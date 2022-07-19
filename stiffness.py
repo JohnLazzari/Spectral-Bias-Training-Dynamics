@@ -12,7 +12,7 @@ import random
 import torchmetrics
 import seaborn as sns
 
-def get_data(image, encoding, L=10, batch_size=2048, RFF=False):
+def get_data(image, encoding, shuffle, L=10,  batch_size=2048, RFF=False):
 
     # Get the training image
     trainimg= image
@@ -37,7 +37,9 @@ def get_data(image, encoding, L=10, batch_size=2048, RFF=False):
     for i in range(H*W):
         full_batches.append((inp_batch[i], inp_target[i]))
 
-    random.shuffle(full_batches)
+    if shuffle:
+        random.shuffle(full_batches)
+
     for i in range(H*W):
         batches.append(full_batches[i][0])
         batch_targets.append(full_batches[i][1])
@@ -60,7 +62,10 @@ optim_pe = torch.optim.Adam(model_pe.parameters(), lr=.001)
 model_gabor = Net(176, 128).to('cuda:0')
 optim_gabor = torch.optim.Adam(model_gabor.parameters(), lr=.001)
 criterion = nn.MSELoss()
-epochs = 10
+epochs = 20
+
+# if cosine, will do cosine similarity, if false, will do sign function of inner product
+cosine = True
 
 # compute gradients individually for each, not sure best way to do this yet
 
@@ -69,10 +74,10 @@ epochs = 10
 im2arr = np.random.randint(0, 255, (28, 28, 3))
 
 # Get the encoding raw_xy
-train_inp_batch, train_inp_target = get_data(image=im2arr, encoding='raw_xy', L=0, batch_size=28)
-inp_batch, inp_target = get_data(image=im2arr, encoding='raw_xy', L=0, batch_size=1)
+train_inp_batch, train_inp_target = get_data(image=im2arr, encoding='raw_xy', shuffle=True, L=0, batch_size=1)
+inp_batch, inp_target = get_data(image=im2arr, encoding='raw_xy', shuffle=False, L=0, batch_size=1)
 
-raw_grad_similarities = []
+raw_grad_similarities = torch.empty([784, 784])
 losses = []
 for epoch in range(epochs):
     raw_gradients = torch.empty([784, 17283]).to('cuda:0')
@@ -83,9 +88,9 @@ for epoch in range(epochs):
         loss = criterion(output, train_inp_target[i])
         loss.backward()
         optim_raw.step()
-    for i, pixel in enumerate(inp_batch):
+    for i, row in enumerate(inp_batch):
         optim_raw.zero_grad()
-        output = model_raw(pixel)
+        output = model_raw(inp_batch[i])
         loss = criterion(output, inp_target[i])
         running_loss += loss.item()
         loss.backward()
@@ -94,17 +99,27 @@ for epoch in range(epochs):
     running_loss /= inp_batch.shape[0]
     losses.append(running_loss)
     # get inner products of gradients for raw xy
-    for i in range(raw_gradients.shape[0]):
-        for j in range(i, raw_gradients.shape[0]):
-            if i != j:
+    if cosine:
+        for i, row in enumerate(inp_batch):
+            for j, column in enumerate(inp_batch):
                 #print(torchmetrics.functional.pairwise_cosine_similarity(raw_gradients[i].unsqueeze(dim=0), raw_gradients[j].unsqueeze(dim=0)).cpu().item())
-                raw_grad_similarities.append(torch.flatten(torchmetrics.functional.pairwise_cosine_similarity(raw_gradients[i].unsqueeze(dim=0), raw_gradients[j].unsqueeze(dim=0))).cpu())
+                raw_grad_similarities[i][j] = torch.dot(raw_gradients[i], raw_gradients[j]).cpu().item()
+    else:
+        for i, row in enumerate(inp_batch):
+            for j, column in enumerate(inp_batch):
+                #print(torchmetrics.functional.pairwise_cosine_similarity(raw_gradients[i].unsqueeze(dim=0), raw_gradients[j].unsqueeze(dim=0)).cpu().item())
+                raw_grad_similarities[i][j] = torch.sign(torch.dot(raw_gradients[i], raw_gradients[j])).cpu().item()
+
+
+plt.matshow(raw_grad_similarities, cmap='inferno')
+plt.colorbar()
+plt.show()
 
 # Get the encoding sin cos
-train_inp_batch, train_inp_target = get_data(image=im2arr, encoding='sin_cos', L=8, batch_size=28)
-inp_batch, inp_target = get_data(image=im2arr, encoding='sin_cos', L=8, batch_size=1)
+train_inp_batch, train_inp_target = get_data(image=im2arr, encoding='sin_cos', shuffle=True, L=8, batch_size=1)
+inp_batch, inp_target = get_data(image=im2arr, encoding='sin_cos', shuffle=False, L=8, batch_size=1)
 
-sin_cos_grad_similarity = []
+sin_cos_grad_similarity = torch.empty([784, 784])
 pe_losses = []
 for epoch in range(epochs):
     pe_gradients = torch.empty([784, 21123]).to('cuda:0')
@@ -126,43 +141,16 @@ for epoch in range(epochs):
     running_loss /= inp_batch.shape[0]
     pe_losses.append(running_loss)
     # get inner products of gradients for sin_cos
-    for i in range(pe_gradients.shape[0]):
-        for j in range(i, pe_gradients.shape[0]):
-            if i != j:
-                sin_cos_grad_similarity.append(torch.flatten(torchmetrics.functional.pairwise_cosine_similarity(pe_gradients[i].unsqueeze(dim=0), pe_gradients[j].unsqueeze(dim=0)).cpu()))
+    if cosine:
+        for i, row in enumerate(inp_batch):
+            for j, column in enumerate(inp_batch):
+                sin_cos_grad_similarity[i][j] = torch.dot(pe_gradients[i], pe_gradients[j]).cpu().item()
+    else:
+        for i, row in enumerate(inp_batch):
+            for j, column in enumerate(inp_batch):
+                sin_cos_grad_similarity[i][j] = torch.sign(torch.dot(pe_gradients[i], pe_gradients[j])).cpu().item()
 
-sns.kdeplot(data=torch.cat(sin_cos_grad_similarity).cpu(), fill=True)
-sns.kdeplot(data=torch.cat(raw_grad_similarities).cpu(), fill=True)
+
+plt.matshow(sin_cos_grad_similarity, cmap='inferno')
+plt.colorbar()
 plt.show()
-
-plt.plot(losses)
-plt.plot(pe_losses)
-plt.show()
-
-'''
-# Get the encoding gabor
-inp_batch, inp_target = get_data(image=im2arr, encoding='gauss', L=8, batch_size=2048)
-
-gabor_gradients = []
-for epoch in range(5):
-    for i, pixel in enumerate(inp_batch):
-        optim_gabor.zero_grad()
-        output = model_gabor(pixel)
-        loss = criterion(output, inp_target[i])
-        loss.backward()
-        if epoch < 4:
-            optim_gabor.step()
-        if epoch == 4:
-            grads = torch.cat([torch.flatten(model_gabor.l1.weight.grad), torch.flatten(model_gabor.l2.weight.grad), torch.flatten(model_gabor.l3.weight.grad)])
-            gabor_gradients.append(grads)
-
-gabor_grad_kernel = []
-# get inner products of gradients for gabor
-for i in range(np.shape(inp_batch)[0]):
-    for j in range(i, np.shape(inp_batch)[0]):
-        if i != j:
-            gabor_grad_kernel.append(torchmetrics.functional.pairwise_cosine_similarity(gabor_gradients[i].unsqueeze(dim=0), gabor_gradients[j].unsqueeze(dim=0)))
-
-lowest = min(gabor_grad_kernel)
-print(lowest)
-'''
