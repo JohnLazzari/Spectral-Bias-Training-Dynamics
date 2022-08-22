@@ -13,15 +13,63 @@ from math import log10, sqrt
 class Net(nn.Module):
     def __init__(self, input_dim, hidden):
         super(Net, self).__init__()
+        self.hidden = hidden
         self.l1 = nn.Linear(input_dim, hidden)
         self.l2 = nn.Linear(hidden, hidden)
         self.l3 = nn.Linear(hidden, 3)
         self.relu = nn.ReLU()
 
-    def forward(self, x):
+    def forward(self, x, act=False):
         out = self.relu(self.l1(x))
+        if act:
+            act_1 = torch.zeros(self.hidden)
+            out_act = out.squeeze()
+            for i in range(self.hidden):
+                if out_act[i] > 0:
+                    act_1[i] = 1
         out = self.relu(self.l2(out))
+        if act:
+            act_2 = torch.zeros(self.hidden)
+            out_act = out.squeeze()
+            for i in range(self.hidden):
+                if out_act[i] > 0:
+                    act_2[i] = 1
+        if act:
+            pattern = torch.cat([act_1, act_2])
+            return np.array(pattern)
+
         out = self.l3(out)
+
+        return out
+
+class SIN(nn.Module):
+    def __init__(self, input_dim, hidden):
+        super(SIN, self).__init__()
+        self.l1 = nn.Linear(input_dim, hidden)
+        self.l2 = nn.Linear(hidden, hidden)
+        self.l3 = nn.Linear(hidden, 3)
+
+    def forward(self, x):
+        out = torch.sin(self.l1(x))
+        out = torch.sin(self.l2(out))
+        out = torch.sigmoid(self.l3(out))
+
+        return out
+
+class SIREN(nn.Module):
+    def __init__(self, input_dim, hidden):
+        super(SIREN, self).__init__()
+        self.l1 = nn.Linear(input_dim, hidden)
+        self.l1.weight.data.uniform_(-np.sqrt(6/input_dim), np.sqrt(6/input_dim))
+        self.l2 = nn.Linear(hidden, hidden)
+        self.l2.weight.data.uniform_(-np.sqrt(6/hidden), np.sqrt(6/hidden))
+        self.l3 = nn.Linear(hidden, 3)
+        self.l3.weight.data.uniform_(-np.sqrt(6/hidden), np.sqrt(6/hidden))
+
+    def forward(self, x):
+        out = torch.sin(30 * self.l1(x))
+        out = torch.sin(self.l2(out))
+        out = torch.sigmoid(self.l3(out))
 
         return out
 
@@ -95,6 +143,7 @@ if __name__ == '__main__':
     # Choose dataset depending on generalizing or reconstructing image
     inp_batch, inp_targets = get_data(image=args.image, encoding=encoding, L=L, batch_size=args.batch_size, RFF=RFF)
     model = Net(inp_batch.shape[2], args.neurons).to(args.device)
+    #model.load_state_dict(torch.load(f'./saved_model/torch_{args.encoding}_{args.image}_smallinit.pth'))
 
     # Training criteria
     criterion = nn.MSELoss()

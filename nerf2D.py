@@ -20,12 +20,13 @@ class Positional_Encoding(object):
         self.training = training
         self.signal = signal
 
+
     def get_dataset(self, L=10, RFF=False):
         height, width, _ = self.image.shape
 
         # Format positions to range [-1, 1)
-        x_linspace = np.linspace(-1, 1, width)
-        y_linspace = np.linspace(-1, 1, width)
+        x_linspace = np.linspace(0, 1, width)
+        y_linspace = np.linspace(0, 1, width)
 
         channels = 3
 
@@ -55,33 +56,47 @@ class Positional_Encoding(object):
 
             elif self.encoding == 'gauss_sin_cos':
 
-                rand = np.random.normal(0, 10)
-                rand_y = np.random.normal(0, 10)
+                x = np.linspace(0, 1, (height)+1)[:-1]
+                x = np.stack(np.meshgrid(x, x), axis=-1)
 
-                x = np.sin(2 * np.pi * rand * x_linspace)
-                x_encoding.append(x)
+                bvals = np.random.normal(size=(1, 2)) * 30
+                inputs = np.concatenate([np.sin((2.*np.pi*x) @ bvals.T), 
+                                           np.cos((2.*np.pi*x) @ bvals.T)], axis=-1)
+                
+                inputs = inputs.reshape(width * height, inputs.shape[-1])
+                outputs = self.image.reshape(width * height, channels)
+                indices = np.array([[x, y] for x in range(width) for y in range(height)])
+                return inputs, outputs, indices
+            
+            elif self.encoding == 'gabor_2d':
 
-                x = np.cos(2 * np.pi * rand * x_linspace)
-                x_encoding_hf.append(x)
+                x = np.linspace(0, 1, (height)+1)[:-1]
+                x = np.stack(np.meshgrid(x, x), axis=-1)
 
-                y = np.sin(2 * np.pi * rand_y * y_linspace)
-                y_encoding.append(y)
+                bvals = np.random.normal(size=(256, 2)) * 14
+                gaussians = np.random.uniform(0, 1, size=(256, 2))
+                variance = np.random.uniform(0, 1, size=(256, 2, 2))
 
-                y = np.cos(2 * np.pi * rand_y * y_linspace)
-                y_encoding_hf.append(y)
+            
+                sin_inputs = np.sin((2.*np.pi*x) @ bvals.T)
+                sin_inputs = sin_inputs.reshape(width * height, sin_inputs.shape[-1])
+                cos_inputs = np.cos((2.*np.pi*x) @ bvals.T)
+                cos_inputs = cos_inputs.reshape(width * height, cos_inputs.shape[-1])
 
+                flattened_input = x.reshape(width * height, x.shape[-1]) 
+                gaussian_inputs = []
+                for i in range(256):
+                    gaussian_inputs.append((1 / (np.sqrt((2*np.pi)**2 * np.linalg.det(variance[i])))) * np.exp(-.5 * ( np.expand_dims((flattened_input - gaussians[i]), axis=1) @ (variance[i] @ np.expand_dims((flattened_input - gaussians[i]).T, axis=1)))))
+                
+                gaussian_inputs = np.concatenate(gaussian_inputs, axis=-1)
+                print(gaussian_inputs.shape)
+                inputs = np.concatenate([sin_inputs * gaussian_inputs,
+                                        cos_inputs * gaussian_inputs], axis=-1)
 
-            # Deep Learning Group proposed encoding.
-            elif self.encoding == 'repeat_xy':
-
-                x_encoding.append(x_linspace)
-
-                x_encoding_hf.append(x_linspace)
-
-                y_encoding.append(y_linspace)
-
-                y_encoding_hf.append(y_linspace)
-
+                outputs = self.image.reshape(width * height, channels)
+                indices = np.array([[x, y] for x in range(width) for y in range(height)])
+                return inputs, outputs, indices
+                
             elif self.encoding == "gauss":
 
                 stddev = .9
@@ -92,26 +107,27 @@ class Positional_Encoding(object):
                 # Generate gaussian encodings.
                 g_enc = []
                 l = np.linspace(-1, 1, width)
+                regions = [2, 3, 4, 5, 6]
                 stop = 25
                 for s in range(1, L + 1):
                     if s <= stop:
-                        for g in range(s+1):
+                        for g in range(regions[s-1]):
                             mu = 2 * g / s - 1
-                            rand = np.random.normal(0, 10)
+                            rand = np.random.normal(s-1, s+1)
                             if RFF:
-                                g_l_sin = gaussian(l, mu, stddev / (s)) * np.sin((2 * rand) * np.pi * l)
-                                g_l_cos = gaussian(l, mu, stddev / (s)) * np.cos((2 * rand) * np.pi * l)
+                                g_l_sin = gaussian(l, mu, stddev / (regions[s]-1)) * np.sin((2 * rand) * np.pi * l)
+                                g_l_cos = gaussian(l, mu, stddev / (regions[s]-1)) * np.cos((2 * rand) * np.pi * l)
                             else:
-                                g_l_sin = gaussian(l, mu, stddev / (s)) * np.sin((2 ** ((s-1))) * np.pi * l)
-                                g_l_cos = gaussian(l, mu, stddev / (s)) * np.cos((2 ** ((s-1))) * np.pi * l)
+                                g_l_sin = gaussian(l, mu, stddev / (regions[s-1]-1)) * np.sin((2 ** ((s-1))) * np.pi * l)
+                                g_l_cos = gaussian(l, mu, stddev / (regions[s-1]-1)) * np.cos((2 ** ((s-1))) * np.pi * l)
 
                             g_enc.append(g_l_sin)
                             g_enc.append(g_l_cos)
                     else:
                         for g in range(stop+1):
                             mu = 2 * g / stop - 1
-                            g_l_sin = gaussian(l, mu, stddev / s) * np.sin((2 ** (s-1)) * np.pi * l)
-                            g_l_cos = gaussian(l, mu, stddev / s) * np.cos((2 ** (s-1)) * np.pi * l)
+                            g_l_sin = gaussian(l, mu, stddev / s) * np.sin((2 ** (s-1)) * l)
+                            g_l_cos = gaussian(l, mu, stddev / s) * np.cos((2 ** (s-1)) * l)
 
                             g_enc.append(g_l_sin)
                             g_enc.append(g_l_cos)
@@ -142,8 +158,8 @@ class Positional_Encoding(object):
                     # i.e. passing raw coordinates instead of positional encoding 
                     if self.encoding == 'raw_xy':
 
-                        xdash = (x/width)*2 -1
-                        ydash = (y/height)*2 -1
+                        xdash = (x/width)
+                        ydash = (y/height)
                         p_enc = [xdash, ydash]
                     else:
                         # Concatenate positional encoding.
