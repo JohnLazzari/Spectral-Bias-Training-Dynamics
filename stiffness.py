@@ -62,7 +62,7 @@ optim_pe = torch.optim.Adam(model_pe.parameters(), lr=.001)
 model_gabor = Net(176, 128).to('cuda:0')
 optim_gabor = torch.optim.Adam(model_gabor.parameters(), lr=.001)
 criterion = nn.MSELoss()
-epochs = 1
+epochs = 1000
 
 # if cosine, will do cosine similarity, if false, will do sign function of inner product
 cosine = True
@@ -71,7 +71,7 @@ cosine = True
 
 #im = Image.open(f'dataset/fractal.jpg')
 #im2arr = np.array(im)
-random_im = False
+random_im = True
 if random_im:
     im2arr = np.random.randint(0, 255, (64, 64, 3))
 else:

@@ -1,4 +1,3 @@
-import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 import numpy as np
@@ -59,7 +58,7 @@ class Positional_Encoding(object):
                 x = np.linspace(0, 1, (height)+1)[:-1]
                 x = np.stack(np.meshgrid(x, x), axis=-1)
 
-                bvals = np.random.normal(size=(1, 2)) * 30
+                bvals = np.random.normal(size=(256, 2)) * 10
                 inputs = np.concatenate([np.sin((2.*np.pi*x) @ bvals.T), 
                                            np.cos((2.*np.pi*x) @ bvals.T)], axis=-1)
                 
@@ -73,11 +72,12 @@ class Positional_Encoding(object):
                 x = np.linspace(0, 1, (height)+1)[:-1]
                 x = np.stack(np.meshgrid(x, x), axis=-1)
 
-                bvals = np.random.normal(size=(256, 2)) * 14
-                gaussians = np.random.uniform(0, 1, size=(256, 2))
-                variance = np.random.uniform(0, 1, size=(256, 2, 2))
+                bvals = np.random.normal(size=(256, 2)) * 10
 
-            
+                gaussians = np.random.uniform(0, 1, size=(256, 2))
+
+                variance = np.random.uniform(0, .2, size=(256, 2, 2))
+
                 sin_inputs = np.sin((2.*np.pi*x) @ bvals.T)
                 sin_inputs = sin_inputs.reshape(width * height, sin_inputs.shape[-1])
                 cos_inputs = np.cos((2.*np.pi*x) @ bvals.T)
@@ -86,13 +86,15 @@ class Positional_Encoding(object):
                 flattened_input = x.reshape(width * height, x.shape[-1]) 
                 gaussian_inputs = []
                 for i in range(256):
-                    gaussian_inputs.append((1 / (np.sqrt((2*np.pi)**2 * np.linalg.det(variance[i])))) * np.exp(-.5 * ( np.expand_dims((flattened_input - gaussians[i]), axis=1) @ (variance[i] @ np.expand_dims((flattened_input - gaussians[i]).T, axis=1)))))
+                    gaussian_inputs.append(np.expand_dims(np.exp(-.5 * np.sum(( (flattened_input - gaussians[i]) * (variance[i] @ (flattened_input - gaussians[i]).T).T ), axis=1)), axis=1))
                 
                 gaussian_inputs = np.concatenate(gaussian_inputs, axis=-1)
                 print(gaussian_inputs.shape)
                 inputs = np.concatenate([sin_inputs * gaussian_inputs,
                                         cos_inputs * gaussian_inputs], axis=-1)
 
+                print(inputs[0])
+                print(inputs[-1])
                 outputs = self.image.reshape(width * height, channels)
                 indices = np.array([[x, y] for x in range(width) for y in range(height)])
                 return inputs, outputs, indices

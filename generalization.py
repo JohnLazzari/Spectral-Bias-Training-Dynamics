@@ -16,23 +16,54 @@ class Net(nn.Module):
         super(Net, self).__init__()
         self.l1 = nn.Linear(input_dim, hidden)
         self.l2 = nn.Linear(hidden, hidden)
-        self.l3 = nn.Linear(hidden, 3)
+        self.l3 = nn.Linear(hidden, hidden)
+        self.l4 = nn.Linear(hidden, 3)
         self.relu = nn.ReLU()
 
     def forward(self, x):
         out = self.relu(self.l1(x))
         out = self.relu(self.l2(out))
-        out = self.l3(out)
+        out = self.relu(self.l3(out))
+        out = torch.sigmoid(self.l4(out))
+
+        return out
+
+class SIN(nn.Module):
+    def __init__(self, input_dim, hidden):
+        super(SIN, self).__init__()
+        self.l1 = nn.Linear(input_dim, hidden)
+        self.l2 = nn.Linear(hidden, hidden)
+        self.l3 = nn.Linear(hidden, 3)
+
+    def forward(self, x):
+        out = torch.sin(self.l1(x))
+        out = torch.sin(self.l2(out))
+        out = torch.sigmoid(self.l3(out))
+
+        return out
+
+class SIREN(nn.Module):
+    def __init__(self, input_dim, hidden):
+        super(SIREN, self).__init__()
+        self.l1 = nn.Linear(input_dim, hidden)
+        self.l1.weight.data.uniform_(-np.sqrt(6/input_dim), np.sqrt(6/input_dim))
+        self.l2 = nn.Linear(hidden, hidden)
+        self.l2.weight.data.uniform_(-np.sqrt(6/hidden), np.sqrt(6/hidden))
+        self.l3 = nn.Linear(hidden, 3)
+        self.l3.weight.data.uniform_(-np.sqrt(6/hidden), np.sqrt(6/hidden))
+
+    def forward(self, x):
+        out = torch.sin(30 * self.l1(x))
+        out = torch.sin(self.l2(out))
+        out = torch.sigmoid(self.l3(out))
 
         return out
 
 def get_data(image, encoding, L=10, batch_size=2048, RFF=False):
     # This is to actually pass the image through the network
-    im = Image.open(f'dataset/{image}.jpg')
-    im2arr = np.array(im) 
 
     # Get the training image
-    trainimg= im2arr 
+    trainimg= image
     trainimg = trainimg / 255.0  
     H, W, C = trainimg.shape
 
@@ -99,14 +130,18 @@ if __name__ == '__main__':
     # Begin training loop
     parser = argparse.ArgumentParser(description='Blah.')
     parser.add_argument('--neurons', type=int, default=128, help='Number of neurons per layer')
-    parser.add_argument('--epochs', type=int, default=350, help='Number of epochs')
+    parser.add_argument('--epochs', type=int, default=1000, help='Number of epochs')
     parser.add_argument('--lr', type=float, default=.005, help='Learning rate')
     parser.add_argument('--device', type=str, default='cuda:0', help='device to train network on')
-    parser.add_argument('--image', type=str, default='fractal', help='Image to learn')
-    parser.add_argument('--batch_size', type=int, default=2048, help='make a training and testing set')
-    parser.add_argument('--fourier_l', type=int, default=5, help='L value for Fourier')
-    parser.add_argument('--gabor_l', type=int, default=5, help='L value for Gabor')
+    parser.add_argument('--batch_size', type=int, default=8192, help='make a training and testing set')
+    parser.add_argument('--fourier_l', type=int, default=7, help='L value for Fourier')
+    parser.add_argument('--gabor_l', type=int, default=7, help='L value for Gabor')
     parser.add_argument('--RFF', type=bool, default=False, help='sample from a gaussian')
+    parser.add_argument('--encoding', type=str, default='gauss', help='encoding to test on')
+    parser.add_argument('--model', type=str, default='relu', help='type of model to train on (relu, sin, or siren)')
+    parser.add_argument('--im_256', type=bool, default=False, help='256x256 images')
+    parser.add_argument('--im_512', type=bool, default=False, help='512x512 images')
+    parser.add_argument('--im_768', type=bool, default=False, help='768x768 images')
     parser.add_argument('--print_training_loss', type=bool, default=False, help='print training loss')
     parser.add_argument('--print_test_loss', type=bool, default=False, help='print testing loss')
     parser.add_argument('--print_psnr', type=bool, default=False, help='print test psnr')
@@ -115,78 +150,104 @@ if __name__ == '__main__':
 
     # lists to keep track of losses for both encodings
     both_encoding_test_loss = []
-    both_encoding_psnr = []
 
     # list of different encoding depths to train
-    encodings = ['gauss', 'sin_cos']
+    encodings = [args.encoding]
     fourier_L = args.fourier_l
     gabor_L = args.gabor_l
     # Determine whether random Gaussian or mip-Gabor will be used
     loss_psnr = torchmetrics.PeakSignalNoiseRatio(data_range=1)
-    average = 5
+    test_data = np.load('test_data_div2k.npy')
+
+    average = 1
+    gabor_psnr = []
+    sin_cos_psnr = []
+    raw_xy_psnr = []
 
     # Training Loop
     # loop through the amount of
-    for encoding in encodings:
-        # keep track of losses for each individual encoding
-        test_psnr = []
+    for im in test_data:
 
-        # Choose dataset depending on generalizing or reconstructing image
-        if encoding == 'gauss': 
-            inp_batch, inp_targets, test_batch, test_targets = get_data(image=args.image, encoding=encoding, L=gabor_L, batch_size=args.batch_size, RFF=args.RFF)
-        elif encoding == 'sin_cos' or encoding == 'gauss_sin_cos': 
-            inp_batch, inp_targets, test_batch, test_targets = get_data(image=args.image, encoding=encoding, L=fourier_L, batch_size=args.batch_size)
+        for encoding in encodings:
+            # keep track of losses for each individual encoding
+            test_psnr = []
 
-        # currently averaging over 5 iterations
-        for k in range(average):
+            # Choose dataset depending on generalizing or reconstructing image
+            if encoding == 'gauss': 
+                inp_batch, inp_targets, test_batch, test_targets = get_data(image=im, encoding=encoding, L=args.gabor_l, batch_size=args.batch_size, RFF=args.RFF)
+            elif encoding == 'sin_cos' or encoding == 'gauss_sin_cos': 
+                inp_batch, inp_targets, test_batch, test_targets = get_data(image=im, encoding=encoding, L=args.fourier_l, batch_size=args.batch_size)
+            elif encoding == 'raw_xy':
+                inp_batch, inp_targets, test_batch, test_targets = get_data(image=im, encoding=encoding, L=0, batch_size=args.batch_size)
+            elif encoding == 'gabor_2d':
+                inp_batch, inp_targets, test_batch, test_targets = get_data(image=im, encoding=encoding, L=1, batch_size=args.batch_size, RFF=args.RFF)
 
-            model = Net(inp_batch.shape[2], args.neurons).to(args.device)
-            # Training criteria
-            criterion = nn.MSELoss()
-            lr = args.lr
-            optimizer = optim.Adam(model.parameters(), lr=lr)
-            epochs = args.epochs
+            # currently averaging over 5 iterations
+            for k in range(average):
 
-            # individual training session lists
-            best_psnr = -20
-            for epoch in range(epochs):
-                running_loss = 0
-                # For a split training and test set
-                for i, batch in enumerate(inp_batch):
-                    optimizer.zero_grad()
-                    output = model(batch)
-                    loss = criterion(output, inp_targets[i])
-                    running_loss += loss.item()
-                    loss.backward()
-                    optimizer.step()
+                if args.model == 'relu':
+                    model = Net(inp_batch.shape[2], args.neurons).to(args.device)
+                elif args.model == 'sin':
+                    model = SIN(inp_batch.shape[2], args.neurons).to(args.device)
+                elif args.model == 'siren':
+                    model = SIREN(inp_batch.shape[2], args.neurons).to(args.device)
 
-                if args.print_training_loss:
-                    loss = running_loss / (inp_batch.shape[0])
-                    print("Epoch {} loss: {}".format(epoch, loss))
+                # Training criteria
+                criterion = nn.MSELoss()
+                lr = args.lr
+                optimizer = optim.Adam(model.parameters(), lr=lr)
+                epochs = args.epochs
 
-                # Get the testing results for this epoch
-                with torch.no_grad():
+                # individual training session lists
+                best_psnr = -20
+                for epoch in range(epochs):
+                    running_loss = 0
+                    # For a split training and test set
+                    for i, batch in enumerate(inp_batch):
+                        optimizer.zero_grad()
+                        output = model(batch)
+                        loss = criterion(output, inp_targets[i])
+                        running_loss += loss.item()
+                        loss.backward()
+                        optimizer.step()
 
-                    test_output = model(test_batch)
-                    test_loss = criterion(test_output, test_targets)
-                    test_output, test_targets = test_output.to('cpu'), test_targets.to('cpu')
+                    if args.print_training_loss:
+                        loss = running_loss / (inp_batch.shape[0])
+                        print("Epoch {} loss: {}".format(epoch, loss))
 
-                    if args.print_test_loss:
-                        print("Epoch {} test loss: {}".format(epoch, loss))
+                    # Get the testing results for this epoch
+                    with torch.no_grad():
 
-                    psnr = loss_psnr(test_output, test_targets).item()
+                        test_output = model(test_batch)
+                        test_loss = criterion(test_output, test_targets)
+                        test_output, test_targets = test_output.to('cpu'), test_targets.to('cpu')
 
-                    if args.print_psnr:
-                        print("Epoch {} psnr: {}".format(epoch, psnr))
+                        if args.print_test_loss:
+                            print("Epoch {} test loss: {}".format(epoch, loss))
 
-                    test_targets = test_targets.to('cuda:0')
-                    # keep track of best loss and psnr
-                    if psnr > best_psnr:
-                        best_psnr = psnr
+                        psnr = loss_psnr(test_output, test_targets).item()
 
-            # append the best psnr and loss after training to the lists
-            test_psnr.append(best_psnr)
+                        if args.print_psnr:
+                            print("Epoch {} psnr: {}".format(epoch, psnr))
 
-        print('{} mean psnr: {}'.format(encoding, np.mean(np.array(test_psnr))))
-        both_encoding_psnr.append(test_psnr)
-        print(both_encoding_psnr)
+                        test_targets = test_targets.to('cuda:0')
+                        # keep track of best loss and psnr
+                        if psnr > best_psnr:
+                            best_psnr = psnr
+
+                # append the best psnr and loss after training to the lists
+                test_psnr.append(best_psnr)
+
+            print('{} max psnr {}: {}'.format(encoding, im, np.max(np.array(test_psnr))))
+
+            if encoding == 'gauss' or encoding == 'gabor_2d':
+                gabor_psnr.append(np.max(np.array(test_psnr)))
+            elif encoding == 'sin_cos' or encoding == 'gauss_sin_cos':
+                sin_cos_psnr.append(np.max(np.array(test_psnr)))
+            elif encoding == 'raw_xy':
+                raw_xy_psnr.append(np.max(np.array(test_psnr)))
+
+    print('total Gabor psnr: {}'.format(np.mean(np.array(gabor_psnr))))
+    print('total Sin_Cos psnr: {}'.format(np.mean(np.array(sin_cos_psnr))))
+    print('total raw_xy psnr: {}'.format(np.mean(np.array(raw_xy_psnr))))
+

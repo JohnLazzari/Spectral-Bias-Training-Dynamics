@@ -61,7 +61,7 @@ def confusion_within_region(model_raw, inp_target, inp_batch, optim_raw, criteri
                 for j, next_index in enumerate(dict_patterns[pattern][i+1:]):
                     within_region.append(torch.flatten(torchmetrics.functional.pairwise_cosine_similarity(raw_gradients[index].unsqueeze(dim=0), raw_gradients[next_index].unsqueeze(dim=0))).cpu())
 
-    sns.kdeplot(data=torch.cat(within_region).cpu(), fill=True, label='raw_xy')
+    sns.kdeplot(data=torch.cat(within_region).cpu(), fill=True, label='confusion within regions')
     plt.legend()
     plt.show()
 
@@ -183,7 +183,7 @@ def main():
     parser.add_argument('--dead_neurons', type=bool, default=False, help='track dead neurons')
     parser.add_argument('--act_patterns', type=bool, default=False, help='check number of unique activation patterns')
     parser.add_argument('--grad_norms', type=bool, default=False, help='check the gradient norms')
-    parser.add_argument('--random', type=bool, default=False, help='use random image')
+    parser.add_argument('--random', type=bool, default=True, help='use random image')
 
     args = parser.parse_args()
 
@@ -254,7 +254,7 @@ def main():
             running_loss += loss.item()
             loss.backward()
             optim_raw.step()
-        epoch_loss = running_loss / 16
+        epoch_loss = running_loss / (64*64 / args.batch_size)
         if args.print_loss:
             print('Loss at epoch {}: {}'.format(epoch, epoch_loss))
         raw_losses.append(epoch_loss)
@@ -270,15 +270,8 @@ def main():
             norm_2 = max(S)
             U, S, V = torch.linalg.svd(model_raw.l3.weight.grad)
             norm_3 = max(S)
-            grad_norm = norm_1 + norm_2 + norm_3
+            grad_norm = norm_1 * norm_2 * norm_3
             total_grad_norm_raw.append(grad_norm.item())
-        '''
-        with torch.no_grad():
-            pixel_1 = model_raw(inp_batch[100], act=True)
-            pixel_2 = model_raw(inp_batch[101], act=True)
-            difference = torch.sum(torch.abs(pixel_1 - pixel_2))
-            print(difference)
-        '''
 
         # This is to find parameter norms for lipschitz constant
         if param_norms:
@@ -331,7 +324,7 @@ def main():
             if epoch % 100 == 0:
                 raw_regions, unique_patterns, all_patterns = get_activation_regions(model_raw, inp_batch)
                 print('number of unique activation regions raw_xy: {}'.format(raw_regions))
-                confusion_within_region(model_raw, inp_target, inp_batch, optim_raw, criterion, unique_patterns, all_patterns)
+                #confusion_within_region(model_raw, inp_target, inp_batch, optim_raw, criterion, unique_patterns, all_patterns)
                 raw_num_patterns.append(raw_regions)
 
     if dead_neurons:
@@ -345,7 +338,6 @@ def main():
         plt.legend()
         plt.show()
 
-    '''
     if act_patterns:
         # Get num regions for raw_xy
         with torch.no_grad():
@@ -354,7 +346,12 @@ def main():
             print('number of unique activation regions raw_xy: {}'.format(raw_regions))
             plot_patterns(unique_patterns, all_patterns)
             raw_num_patterns.append(raw_regions)
-    '''
+    
+    if confusion:
+        # get confusion within region for raw_xy
+        sns.kdeplot(data=torch.cat(raw_grad_similarities).cpu(), fill=True, label='confusion overall')
+        raw_regions, unique_patterns, all_patterns = get_activation_regions(model_raw, inp_batch)
+        confusion_within_region(model_raw, inp_target, inp_batch, optim_raw, criterion, unique_patterns, all_patterns)
 
     ######################## Positional Encoding ######################################
 
@@ -396,7 +393,7 @@ def main():
             running_loss += loss.item()
             loss.backward()
             optim_pe.step()
-        epoch_loss = running_loss / 16
+        epoch_loss = running_loss / (64*64 / args.batch_size)
         pe_losses.append(epoch_loss)
         if args.print_loss:
             print('Loss at epoch {}: {}'.format(epoch, epoch_loss))
@@ -412,15 +409,8 @@ def main():
             norm_2 = max(S)
             U, S, V = torch.linalg.svd(model_pe.l3.weight.grad)
             norm_3 = max(S)
-            total_grad_norm = norm_1 + norm_2 + norm_3
+            total_grad_norm = norm_1 * norm_2 * norm_3
             total_grad_norm_pe.append(total_grad_norm.item())
-        '''
-        with torch.no_grad():
-            pixel_1 = model_pe(inp_batch[100], act=True)
-            pixel_2 = model_pe(inp_batch[101], act=True)
-            difference = torch.sum(torch.abs(pixel_1 - pixel_2))
-            print(difference)
-        '''
 
         # Get param norms for lipschitz sin_cos
         if param_norms:
@@ -467,7 +457,7 @@ def main():
 
         if act_patterns:
             # Get the number of activation regions for sin_cos
-            if epoch % 50 == 0:
+            if epoch % 100 == 0:
                 with torch.no_grad():
                     pe_regions, unique_patterns, all_patterns = get_activation_regions(model_pe, inp_batch)
                     print('Num unique activation patterns sin_cos: {}'.format(pe_regions))
@@ -476,16 +466,14 @@ def main():
     if act_patterns:
         # get the regions over loss
         plt.plot(pe_num_patterns, label='positional encoding')
-        plt.plot(raw_num_patterns, label='no positional encoding')
+        #plt.plot(raw_num_patterns, label='no positional encoding')
         plt.legend()
         plt.show()
 
-    '''
     plt.plot(pe_losses, label='positional encoding')
     plt.plot(raw_losses, label='no positional encoding')
     plt.legend()
     plt.show()
-    '''
 
     if grad_norms:
         plt.plot(total_grad_norm_raw, label='raw_grad_norms')
