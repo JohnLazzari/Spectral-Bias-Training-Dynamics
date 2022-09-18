@@ -4,7 +4,9 @@ import numpy as np
 from PIL import Image
 from scipy.fft import fft, ifft
 import argparse
+import torch
 import os
+from scipy.stats import multivariate_normal
 
 def gaussian(x, mu=0, stddev=1):
     return (1. / (stddev * np.sqrt(2. * np.pi))) * np.exp((-(x - mu)**2) / (2. * (stddev ** 2.)))
@@ -57,10 +59,20 @@ class Positional_Encoding(object):
 
                 x = np.linspace(0, 1, (height)+1)[:-1]
                 x = np.stack(np.meshgrid(x, x), axis=-1)
+                x = x.reshape(width*height, 2)
+                x = torch.Tensor(x).to('cuda:0')
 
                 bvals = np.random.normal(size=(256, 2)) * 10
-                inputs = np.concatenate([np.sin((2.*np.pi*x) @ bvals.T), 
-                                           np.cos((2.*np.pi*x) @ bvals.T)], axis=-1)
+                bvals = torch.Tensor(bvals).to('cuda:0')
+                inputs = torch.cat([torch.sin((2.*np.pi*x) @ bvals.T), 
+                                    torch.cos((2.*np.pi*x) @ bvals.T)], dim=-1)
+                for k in range(0):
+                    bvals = np.random.normal(size=(256, 2)) * 10
+                    bvals = torch.Tensor(bvals).to('cuda:0')
+                    encoding = torch.cat([torch.sin((2.*np.pi*x) @ bvals.T), 
+                                          torch.cos((2.*np.pi*x) @ bvals.T)], dim=-1)
+                    inputs += encoding
+                inputs = np.array(inputs.cpu())
                 
                 inputs = inputs.reshape(width * height, inputs.shape[-1])
                 outputs = self.image.reshape(width * height, channels)
@@ -69,35 +81,62 @@ class Positional_Encoding(object):
             
             elif self.encoding == 'gabor_2d':
 
-                x = np.linspace(0, 1, (height)+1)[:-1]
+                # make this gabor perform better then do a sum of sinusoids to potentially improve performance
+                # this worked for Gaussian Fourier Features
+
+                x = np.linspace(-1, 1, (height)+1)[:-1]
                 x = np.stack(np.meshgrid(x, x), axis=-1)
-
-                bvals = np.random.normal(size=(256, 2)) * 10
-
-                gaussians = np.random.uniform(0, 1, size=(256, 2))
-
-                variance = np.random.uniform(0, .2, size=(256, 2, 2))
-
-                sin_inputs = np.sin((2.*np.pi*x) @ bvals.T)
-                sin_inputs = sin_inputs.reshape(width * height, sin_inputs.shape[-1])
-                cos_inputs = np.cos((2.*np.pi*x) @ bvals.T)
-                cos_inputs = cos_inputs.reshape(width * height, cos_inputs.shape[-1])
-
+                x = torch.Tensor(x).to('cuda:0')
                 flattened_input = x.reshape(width * height, x.shape[-1]) 
-                gaussian_inputs = []
-                for i in range(256):
-                    gaussian_inputs.append(np.expand_dims(np.exp(-.5 * np.sum(( (flattened_input - gaussians[i]) * (variance[i] @ (flattened_input - gaussians[i]).T).T ), axis=1)), axis=1))
-                
-                gaussian_inputs = np.concatenate(gaussian_inputs, axis=-1)
-                print(gaussian_inputs.shape)
-                inputs = np.concatenate([sin_inputs * gaussian_inputs,
-                                        cos_inputs * gaussian_inputs], axis=-1)
 
-                print(inputs[0])
-                print(inputs[-1])
+                #gaussians = torch.empty(256, 2).to('cuda:0')
+                #gaussians = gaussians.uniform_(-1, 1)
+                #variance = torch.empty(256).to('cuda:0')
+                #variance =  torch.distributions.gamma.Gamma(2, 1).sample((256,)).to('cuda:0')
+                #eye = torch.eye(2).to('cuda:0')
+                #variance *= eye
+
+                encodings = []
+
+                for k in range(1):
+
+                    dims = 128
+                    bvals = np.random.normal(size=(dims, 2)) * 8
+                    bvals = torch.Tensor(bvals).to('cuda:0')
+                    sin_component = torch.sin((2.*np.pi*x) @ bvals.T)
+                    cos_component = torch.cos((2.*np.pi*x) @ bvals.T)
+
+                    #sin_component = sin_component.reshape(width * height, sin_component.shape[-1])
+                    #cos_component = cos_component.reshape(width * height, cos_component.shape[-1])
+                    gaussian_inputs = []
+
+                    gaussians = np.random.uniform(-1, 1, size=(dims, 2))
+                    gaussians = torch.Tensor(gaussians).to('cuda:0')
+
+                    #variance =  torch.distributions.gamma.Gamma(6, 2).sample((256,)).to('cuda:0')
+                    variance = torch.empty(dims)
+                    variance = variance.uniform_(.15, .45).to('cuda:0')
+
+                    D = (
+                            (x ** 2).sum(-1)[..., None]
+                            + (gaussians ** 2).sum(-1)[None, :]
+                            - 2 * x @ gaussians.T
+                        )
+                    gaussian_encoding = torch.exp(-.5 * D * variance[None, :])
+
+                    inputs = torch.cat([sin_component * gaussian_encoding,
+                                        cos_component * gaussian_encoding], dim=-1)
+                    
+                    inputs = np.array(inputs.cpu())
+                    inputs = np.reshape(inputs, [width*height, dims*2])
+                    encodings.append(inputs)
+
+                encodings = np.stack(encodings, axis=2)
+                encodings = np.sum(encodings, axis=2)
+
                 outputs = self.image.reshape(width * height, channels)
                 indices = np.array([[x, y] for x in range(width) for y in range(height)])
-                return inputs, outputs, indices
+                return encodings, outputs, indices
                 
             elif self.encoding == "gauss":
 
@@ -106,33 +145,18 @@ class Positional_Encoding(object):
                 if np.max(self.image) > 1:
                     self.image = self.image / 255.
                 
-                # Generate gaussian encodings.
+                 # Generate gaussian encodings.
                 g_enc = []
                 l = np.linspace(-1, 1, width)
-                regions = [2, 3, 4, 5, 6]
-                stop = 25
+                regions = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
                 for s in range(1, L + 1):
-                    if s <= stop:
-                        for g in range(regions[s-1]):
-                            mu = 2 * g / s - 1
-                            rand = np.random.normal(s-1, s+1)
-                            if RFF:
-                                g_l_sin = gaussian(l, mu, stddev / (regions[s]-1)) * np.sin((2 * rand) * np.pi * l)
-                                g_l_cos = gaussian(l, mu, stddev / (regions[s]-1)) * np.cos((2 * rand) * np.pi * l)
-                            else:
-                                g_l_sin = gaussian(l, mu, stddev / (regions[s-1]-1)) * np.sin((2 ** ((s-1))) * np.pi * l)
-                                g_l_cos = gaussian(l, mu, stddev / (regions[s-1]-1)) * np.cos((2 ** ((s-1))) * np.pi * l)
+                    for g in range(regions[s-1]):
+                        mu = 2 * g / s - 1
+                        g_l_sin = gaussian(l, mu, stddev / (regions[s-1]-1)) * np.sin((2 * np.random.normal(0, 10)) * np.pi * l)
+                        g_l_cos = gaussian(l, mu, stddev / (regions[s-1]-1)) * np.cos((2 * np.random.normal(0, 10)) * np.pi * l)
 
-                            g_enc.append(g_l_sin)
-                            g_enc.append(g_l_cos)
-                    else:
-                        for g in range(stop+1):
-                            mu = 2 * g / stop - 1
-                            g_l_sin = gaussian(l, mu, stddev / s) * np.sin((2 ** (s-1)) * l)
-                            g_l_cos = gaussian(l, mu, stddev / s) * np.cos((2 ** (s-1)) * l)
-
-                            g_enc.append(g_l_sin)
-                            g_enc.append(g_l_cos)
+                        g_enc.append(g_l_sin)
+                        g_enc.append(g_l_cos)
 
                 g_enc = np.array(g_enc)
                 # Format as inputs.

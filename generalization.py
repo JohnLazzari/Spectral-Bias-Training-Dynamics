@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 from nerf2D import Positional_Encoding
@@ -17,28 +18,75 @@ class Net(nn.Module):
         self.l1 = nn.Linear(input_dim, hidden)
         self.l2 = nn.Linear(hidden, hidden)
         self.l3 = nn.Linear(hidden, hidden)
-        self.l4 = nn.Linear(hidden, 3)
+        self.l4 = nn.Linear(hidden, hidden)
+        self.l5 = nn.Linear(hidden, 3)
         self.relu = nn.ReLU()
 
     def forward(self, x):
         out = self.relu(self.l1(x))
         out = self.relu(self.l2(out))
         out = self.relu(self.l3(out))
-        out = torch.sigmoid(self.l4(out))
+        out = self.relu(self.l4(out))
+        out = torch.sigmoid(self.l5(out))
 
         return out
 
-class SIN(nn.Module):
+class GaborNet(nn.Module):
     def __init__(self, input_dim, hidden):
-        super(SIN, self).__init__()
-        self.l1 = nn.Linear(input_dim, hidden)
+        super(GaborNet, self).__init__()
+        weight_scale = 1
+        self.mu1 = nn.Parameter(2 * torch.rand(int(hidden), input_dim) - 1)
+        self.mu2 = nn.Parameter(2 * torch.rand(int(hidden), input_dim) - 1)
+        self.gamma1 = nn.Parameter(
+            torch.distributions.uniform.Uniform(.01, .1).sample((int(hidden),))
+        )
+        self.gamma2 = nn.Parameter(
+            torch.distributions.uniform.Uniform(.01, .1).sample((int(hidden),))
+        )
+
+        self.sin_network1 = nn.Linear(input_dim, int(hidden))
+        nn.init.uniform_(self.sin_network1.weight, a=-12*np.pi, b=12*np.pi)
+        self.sin_network1.bias.data.uniform_(-np.pi, np.pi)
+
+        self.cos_network1 = nn.Linear(input_dim, int(hidden))
+        nn.init.uniform_(self.cos_network1.weight, a=-12*np.pi, b=12*np.pi)
+        self.cos_network1.bias.data.uniform_(-np.pi, np.pi)
+
+        self.l1 = nn.Linear(hidden*2, hidden)
+        nn.init.xavier_uniform_(self.l1.weight)
         self.l2 = nn.Linear(hidden, hidden)
-        self.l3 = nn.Linear(hidden, 3)
+        nn.init.xavier_uniform_(self.l2.weight)
+        self.l3 = nn.Linear(hidden, hidden)
+        nn.init.xavier_uniform_(self.l3.weight)
+        self.l4 = nn.Linear(hidden, hidden)
+        nn.init.xavier_uniform_(self.l4.weight)
+        self.l5 = nn.Linear(hidden, 3)
+        nn.init.xavier_uniform_(self.l5.weight)
+        self.relu = nn.ReLU()
 
     def forward(self, x):
-        out = torch.sin(self.l1(x))
-        out = torch.sin(self.l2(out))
-        out = torch.sigmoid(self.l3(out))
+
+        D1 = (
+            (x ** 2).sum(-1)[..., None]
+            + (self.mu1 ** 2).sum(-1)[None, :]
+            - 2 * x @ self.mu1.T
+        )
+
+        D2 = (
+            (x ** 2).sum(-1)[..., None]
+            + (self.mu2 ** 2).sum(-1)[None, :]
+            - 2 * x @ self.mu2.T
+        )
+
+        sin_out = torch.sin(self.sin_network1(x)) * torch.exp(-0.5 * D1 * self.gamma1[None, :])
+        cos_out = torch.cos(self.cos_network1(x)) * torch.exp(-0.5 * D2 * self.gamma2[None, :])
+        out = torch.cat((sin_out, cos_out), dim=-1) 
+        
+        out = self.relu(self.l1(out)) 
+        out = self.relu(self.l2(out)) 
+        out = self.relu(self.l3(out)) 
+        out = self.relu(self.l4(out)) 
+        out = torch.sigmoid(self.l5(out))
 
         return out
 
@@ -47,15 +95,22 @@ class SIREN(nn.Module):
         super(SIREN, self).__init__()
         self.l1 = nn.Linear(input_dim, hidden)
         self.l1.weight.data.uniform_(-np.sqrt(6/input_dim), np.sqrt(6/input_dim))
+        self.l1.weight.data *= 30
         self.l2 = nn.Linear(hidden, hidden)
         self.l2.weight.data.uniform_(-np.sqrt(6/hidden), np.sqrt(6/hidden))
-        self.l3 = nn.Linear(hidden, 3)
+        self.l3 = nn.Linear(hidden, hidden)
         self.l3.weight.data.uniform_(-np.sqrt(6/hidden), np.sqrt(6/hidden))
+        self.l4 = nn.Linear(hidden, hidden)
+        self.l4.weight.data.uniform_(-np.sqrt(6/hidden), np.sqrt(6/hidden))
+        self.l5 = nn.Linear(hidden, 3)
+        self.l5.weight.data.uniform_(-np.sqrt(6/hidden), np.sqrt(6/hidden))
 
     def forward(self, x):
-        out = torch.sin(30 * self.l1(x))
+        out = torch.sin(self.l1(x))
         out = torch.sin(self.l2(out))
-        out = torch.sigmoid(self.l3(out))
+        out = torch.sin(self.l3(out))
+        out = torch.sin(self.l4(out))
+        out = torch.sigmoid(self.l5(out))
 
         return out
 
@@ -129,22 +184,22 @@ if __name__ == '__main__':
 
     # Begin training loop
     parser = argparse.ArgumentParser(description='Blah.')
-    parser.add_argument('--neurons', type=int, default=128, help='Number of neurons per layer')
-    parser.add_argument('--epochs', type=int, default=1000, help='Number of epochs')
-    parser.add_argument('--lr', type=float, default=.005, help='Learning rate')
+    parser.add_argument('--neurons', type=int, default=256, help='Number of neurons per layer')
+    parser.add_argument('--epochs', type=int, default=2000, help='Number of epochs')
+    parser.add_argument('--lr', type=float, default=.0009, help='Learning rate')
     parser.add_argument('--device', type=str, default='cuda:0', help='device to train network on')
     parser.add_argument('--batch_size', type=int, default=8192, help='make a training and testing set')
     parser.add_argument('--fourier_l', type=int, default=7, help='L value for Fourier')
     parser.add_argument('--gabor_l', type=int, default=7, help='L value for Gabor')
     parser.add_argument('--RFF', type=bool, default=False, help='sample from a gaussian')
-    parser.add_argument('--encoding', type=str, default='gauss', help='encoding to test on')
-    parser.add_argument('--model', type=str, default='relu', help='type of model to train on (relu, sin, or siren)')
+    parser.add_argument('--encoding', type=str, default='raw_xy', help='encoding to test on')
+    parser.add_argument('--model', type=str, default='gabor', help='type of model to train on (relu, sin, or siren)')
     parser.add_argument('--im_256', type=bool, default=False, help='256x256 images')
     parser.add_argument('--im_512', type=bool, default=False, help='512x512 images')
     parser.add_argument('--im_768', type=bool, default=False, help='768x768 images')
     parser.add_argument('--print_training_loss', type=bool, default=False, help='print training loss')
     parser.add_argument('--print_test_loss', type=bool, default=False, help='print testing loss')
-    parser.add_argument('--print_psnr', type=bool, default=False, help='print test psnr')
+    parser.add_argument('--print_psnr', type=bool, default=True, help='print test psnr')
 
     args = parser.parse_args()
 
@@ -191,6 +246,12 @@ if __name__ == '__main__':
                     model = SIN(inp_batch.shape[2], args.neurons).to(args.device)
                 elif args.model == 'siren':
                     model = SIREN(inp_batch.shape[2], args.neurons).to(args.device)
+                elif args.model == 'filter':
+                    model = Filter(inp_batch.shape[2], args.neurons).to(args.device)
+                elif args.model == 'gabor':
+                    model = GaborNet(inp_batch.shape[2], args.neurons).to(args.device)
+                elif args.model == 'init':
+                    model = InitNet(inp_batch.shape[2], args.neurons).to(args.device)
 
                 # Training criteria
                 criterion = nn.MSELoss()

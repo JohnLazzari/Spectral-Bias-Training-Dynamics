@@ -18,6 +18,9 @@ import itertools
 import argparse
 from matplotlib import cm
 
+sns.set_style('darkgrid')
+colors = sns.color_palette('pastel')
+
 def get_activation_regions(model, input):
     with torch.no_grad():
         patterns = []
@@ -347,12 +350,13 @@ def main():
             plot_patterns(unique_patterns, all_patterns)
             raw_num_patterns.append(raw_regions)
     
+    '''
     if confusion:
         # get confusion within region for raw_xy
         sns.kdeplot(data=torch.cat(raw_grad_similarities).cpu(), fill=True, label='confusion overall')
         raw_regions, unique_patterns, all_patterns = get_activation_regions(model_raw, inp_batch)
         confusion_within_region(model_raw, inp_target, inp_batch, optim_raw, criterion, unique_patterns, all_patterns)
-
+    '''
     ######################## Positional Encoding ######################################
 
     # Get the encoding sin cos
@@ -443,7 +447,7 @@ def main():
         # get confusion sin_cos
         if confusion:
             if epoch > epochs-2:
-                pe_gradients = torch.empty([4096, 21123]).to('cuda:0')
+                pe_gradients = torch.empty([4096, 217731]).to('cuda:0')
                 for i, pixel in enumerate(inp_batch):
                     optim_pe.zero_grad()
                     output = model_pe(pixel)
@@ -470,10 +474,12 @@ def main():
         plt.legend()
         plt.show()
 
-    plt.plot(pe_losses, label='positional encoding')
-    plt.plot(raw_losses, label='no positional encoding')
+    plt.plot(pe_losses, label='positional encoding', color=colors[0], linewidth=2)
+    plt.plot(raw_losses, label='no positional encoding', color=colors[1], linewidth=2)
+    plt.xlabel('Epochs')
+    plt.ylabel('MSE')
     plt.legend()
-    plt.show()
+    plt.savefig('losses.png')
 
     if grad_norms:
         plt.plot(total_grad_norm_raw, label='raw_grad_norms')
@@ -526,6 +532,7 @@ def main():
         sns.kdeplot(data=torch.cat(sin_cos_grad_similarity).cpu(), fill=True, label='Fourier Features')
         sns.kdeplot(data=torch.cat(raw_grad_similarities).cpu(), fill=True, label='raw_xy')
         plt.legend()
+        plt.savefig('confusion_high_dim.png')
         plt.show()
 
 if __name__ == '__main__':
