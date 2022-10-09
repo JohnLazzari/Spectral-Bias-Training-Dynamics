@@ -11,15 +11,70 @@ import random
 import torchmetrics
 from math import log10, sqrt
 from tqdm import tqdm as tq
+import seaborn as sns
+
+class ListModule(object):
+    def __init__(self, module, prefix, *args):
+        self.module = module
+        self.prefix = prefix
+        self.num_module = 0
+        for new_module in args:
+            self.append(new_module)
+
+    def append(self, new_module):
+        if not isinstance(new_module, nn.Module):
+            raise ValueError('Not a Module')
+        else:
+            self.module.add_module(self.prefix + str(self.num_module), new_module)
+            self.num_module += 1
+
+    def __len__(self):
+        return self.num_module
+
+    def __getitem__(self, i):
+        if i < 0 or i >= self.num_module:
+            raise IndexError('Out of bound')
+        return getattr(self.module, self.prefix + str(i))
+
+class maxout_mlp(nn.Module):
+    def __init__(self, num_units=2):
+        super(maxout_mlp, self).__init__()
+        self.fc1_list = ListModule(self, "fc1_")
+        self.fc2_list = ListModule(self, "fc2_")
+        for _ in range(num_units):
+            self.fc1_list.append(nn.Linear(2, 256))
+            self.fc2_list.append(nn.Linear(256, 3))
+
+    def forward(self, x): 
+        x = self.maxout(x, self.fc1_list)
+        x = self.maxout(x, self.fc2_list)
+        return torch.sigmoid(x)
+
+    def maxout(self, x, layer_list):
+        max_output = layer_list[0](x)
+        for _, layer in enumerate(layer_list, start=1):
+            max_output = torch.max(max_output, layer(x))
+        return max_output
+
 
 class Net(nn.Module):
     def __init__(self, input_dim, hidden):
         super(Net, self).__init__()
         self.l1 = nn.Linear(input_dim, hidden)
+        nn.init.orthogonal_(self.l1.weight)
         self.l2 = nn.Linear(hidden, hidden)
+        nn.init.xavier_uniform_(self.l2.weight)
         self.l3 = nn.Linear(hidden, hidden)
+        nn.init.xavier_uniform_(self.l3.weight)
         self.l4 = nn.Linear(hidden, hidden)
-        self.l5 = nn.Linear(hidden, 3)
+        nn.init.xavier_uniform_(self.l4.weight)
+        self.l5 = nn.Linear(hidden, hidden)
+        nn.init.xavier_uniform_(self.l5.weight)
+        self.l6 = nn.Linear(hidden, hidden)
+        nn.init.xavier_uniform_(self.l6.weight)
+        self.l7 = nn.Linear(hidden, hidden)
+        nn.init.xavier_uniform_(self.l7.weight)
+        self.l8 = nn.Linear(hidden, 3)
         self.relu = nn.ReLU()
 
     def forward(self, x):
@@ -27,42 +82,66 @@ class Net(nn.Module):
         out = self.relu(self.l2(out))
         out = self.relu(self.l3(out))
         out = self.relu(self.l4(out))
-        out = torch.sigmoid(self.l5(out))
+        out = self.relu(self.l4(out))
+        out = self.relu(self.l5(out))
+        out = self.relu(self.l6(out))
+        out = self.relu(self.l7(out))
+        out = torch.sigmoid(self.l8(out))
 
         return out
 
-class GaborNet(nn.Module):
+class Idea(nn.Module):
     def __init__(self, input_dim, hidden):
-        super(GaborNet, self).__init__()
+        super(Idea, self).__init__()
         weight_scale = 1
-        self.mu1 = nn.Parameter(2 * torch.rand(int(hidden), input_dim) - 1)
-        self.mu2 = nn.Parameter(2 * torch.rand(int(hidden), input_dim) - 1)
-        self.gamma1 = nn.Parameter(
-            torch.distributions.uniform.Uniform(.01, .1).sample((int(hidden),))
-        )
-        self.gamma2 = nn.Parameter(
-            torch.distributions.uniform.Uniform(.01, .1).sample((int(hidden),))
-        )
 
-        self.sin_network1 = nn.Linear(input_dim, int(hidden))
-        nn.init.uniform_(self.sin_network1.weight, a=-12*np.pi, b=12*np.pi)
+        self.mu1 = 2 * torch.rand(hidden, input_dim) - 1
+        self.mu1 = nn.Parameter(self.mu1)
+
+        self.mu2 = 2 * torch.rand(hidden, input_dim) - 1
+        self.mu2 = nn.Parameter(self.mu2)
+
+        self.mu3 = 2 * torch.rand(hidden, input_dim) - 1
+        self.mu3 = nn.Parameter(self.mu3)
+
+        self.mu4 = 2 * torch.rand(hidden, input_dim) - 1
+        self.mu4 = nn.Parameter(self.mu4)
+
+        self.gamma1 = nn.Parameter(torch.distributions.uniform.Uniform(0, 1).sample((int(hidden),)))
+        self.gamma2 = nn.Parameter(torch.distributions.uniform.Uniform(0, 1).sample((int(hidden),)))
+        self.gamma3 = nn.Parameter(torch.distributions.uniform.Uniform(0, 1).sample((int(hidden),)))
+        self.gamma4 = nn.Parameter(torch.distributions.uniform.Uniform(0, 1).sample((int(hidden),)))
+        
+        self.sin_network1 = nn.Linear(input_dim, hidden) 
+        nn.init.uniform_(self.sin_network1.weight, -15*np.pi, 15*np.pi)
         self.sin_network1.bias.data.uniform_(-np.pi, np.pi)
 
-        self.cos_network1 = nn.Linear(input_dim, int(hidden))
-        nn.init.uniform_(self.cos_network1.weight, a=-12*np.pi, b=12*np.pi)
+        self.cos_network1 = nn.Linear(input_dim, hidden) 
+        nn.init.uniform_(self.cos_network1.weight, -15*np.pi, 15*np.pi)
         self.cos_network1.bias.data.uniform_(-np.pi, np.pi)
 
-        self.l1 = nn.Linear(hidden*2, hidden)
-        nn.init.xavier_uniform_(self.l1.weight)
-        self.l2 = nn.Linear(hidden, hidden)
-        nn.init.xavier_uniform_(self.l2.weight)
-        self.l3 = nn.Linear(hidden, hidden)
-        nn.init.xavier_uniform_(self.l3.weight)
-        self.l4 = nn.Linear(hidden, hidden)
-        nn.init.xavier_uniform_(self.l4.weight)
+        sin_local_1 = torch.eye(256) * torch.distributions.uniform.Uniform(-5*np.pi, 5*np.pi).sample((hidden, hidden))
+        cos_local_1 = torch.eye(256) * torch.distributions.uniform.Uniform(-5*np.pi, 5*np.pi).sample((hidden, hidden))
+        bias_1 = torch.distributions.uniform.Uniform(-np.pi, np.pi).sample((hidden,))
+        self.sin_local_1 = nn.Parameter(sin_local_1)
+        self.cos_local_1 = nn.Parameter(cos_local_1)
+        self.bias_1 = nn.Parameter(bias_1)
+
+        sin_local_3 = torch.eye(hidden) * torch.distributions.uniform.Uniform(-5*np.pi, 5*np.pi).sample((hidden, hidden))
+        cos_local_3 = torch.eye(hidden) * torch.distributions.uniform.Uniform(-5*np.pi, 5*np.pi).sample((hidden, hidden))
+        bias_3 = torch.distributions.uniform.Uniform(-np.pi, np.pi).sample((hidden,))
+        self.sin_local_3 = nn.Parameter(sin_local_3)
+        self.cos_local_3 = nn.Parameter(cos_local_3)
+        self.bias_3 = nn.Parameter(bias_3)
+
+        sin_local_4 = torch.eye(hidden) * torch.distributions.uniform.Uniform(-5*np.pi, 5*np.pi).sample((hidden, hidden))
+        cos_local_4 = torch.eye(hidden) * torch.distributions.uniform.Uniform(-5*np.pi, 5*np.pi).sample((hidden, hidden))
+        bias_4 = torch.distributions.uniform.Uniform(-np.pi, np.pi).sample((hidden,))
+        self.sin_local_4 = nn.Parameter(sin_local_4)
+        self.cos_local_4 = nn.Parameter(cos_local_4)
+        self.bias_4 = nn.Parameter(bias_4)
+
         self.l5 = nn.Linear(hidden, 3)
-        nn.init.xavier_uniform_(self.l5.weight)
-        self.relu = nn.ReLU()
 
     def forward(self, x):
 
@@ -78,14 +157,95 @@ class GaborNet(nn.Module):
             - 2 * x @ self.mu2.T
         )
 
-        sin_out = torch.sin(self.sin_network1(x)) * torch.exp(-0.5 * D1 * self.gamma1[None, :])
-        cos_out = torch.cos(self.cos_network1(x)) * torch.exp(-0.5 * D2 * self.gamma2[None, :])
-        out = torch.cat((sin_out, cos_out), dim=-1) 
+        D3 = (
+            (x ** 2).sum(-1)[..., None]
+            + (self.mu3 ** 2).sum(-1)[None, :]
+            - 2 * x @ self.mu3.T
+        )
+
+        D4 = (
+            (x ** 2).sum(-1)[..., None]
+            + (self.mu4 ** 2).sum(-1)[None, :]
+            - 2 * x @ self.mu4.T
+        )
+
+        sin_out = (torch.sin(self.sin_network1(x))) * torch.exp(-0.5 * D1 * self.gamma1[None, :]) 
+        cos_out = (torch.cos(self.cos_network1(x))) * torch.exp(-0.5 * D2 * self.gamma2[None, :])
+
+        local_out = (sin_out @ self.sin_local_1) + (cos_out @ self.cos_local_1) + self.bias_1
+        sin_out = torch.sin(local_out[:, :128])
+        cos_out = torch.cos(local_out[:, 128:])
+
+        local_out = (torch.cat((sin_out, sin_out), dim=-1) @ self.sin_local_3) + (torch.cat((cos_out, cos_out), dim=-1) @ self.cos_local_3) + self.bias_3
+        sin_out = torch.sin(local_out[:, :128])
+        cos_out = torch.cos(local_out[:, 128:])
+
+        local_out = (torch.cat((sin_out, sin_out), dim=-1) @ self.sin_local_4) + (torch.cat((cos_out, cos_out), dim=-1) @ self.cos_local_4) + self.bias_4
+        local_out[:, :128] = torch.sin(local_out[:, :128])
+        local_out[:, 128:] = torch.cos(local_out[:, 128:])
         
-        out = self.relu(self.l1(out)) 
-        out = self.relu(self.l2(out)) 
-        out = self.relu(self.l3(out)) 
-        out = self.relu(self.l4(out)) 
+        out = torch.sigmoid(self.l5(local_out))
+
+        return out
+
+class GaborNet(nn.Module):
+    def __init__(self, input_dim, hidden):
+        super(GaborNet, self).__init__()
+        weight_scale = 1
+
+        self.mu1 = 2 * torch.rand(hidden, input_dim) - 1
+        self.mu1 = nn.Parameter(self.mu1)
+
+        self.mu2 = 2 * torch.rand(hidden, input_dim) - 1
+        self.mu2 = nn.Parameter(self.mu2)
+
+        self.gamma1 = nn.Parameter(torch.distributions.uniform.Uniform(0, 1).sample((int(hidden),)))
+        self.gamma2 = nn.Parameter(torch.distributions.uniform.Uniform(0, 1).sample((int(hidden),)))
+        self.gamma3 = nn.Parameter(torch.distributions.uniform.Uniform(0, 3).sample((int(hidden),)))
+        
+        self.sin_network1 = nn.Linear(input_dim, hidden) 
+        nn.init.uniform_(self.sin_network1.weight, -15*np.pi, 15*np.pi)
+        self.sin_network1.bias.data.uniform_(-np.pi, np.pi)
+
+        self.cos_network1 = nn.Linear(input_dim, hidden) 
+        nn.init.uniform_(self.cos_network1.weight, -15*np.pi, 15*np.pi)
+        self.cos_network1.bias.data.uniform_(-np.pi, np.pi)
+
+        self.l1 = nn.Linear(hidden*2, hidden)
+        nn.init.xavier_uniform_(self.l1.weight)
+        self.l2 = nn.Linear(hidden, hidden)
+        nn.init.xavier_uniform_(self.l2.weight)
+        self.l3 = nn.Linear(hidden, hidden)
+        nn.init.xavier_uniform_(self.l3.weight)
+        self.l4 = nn.Linear(hidden, hidden)
+        nn.init.xavier_uniform_(self.l4.weight)
+        self.l5 = nn.Linear(hidden, 3)
+        nn.init.xavier_uniform_(self.l5.weight)
+        self.relu = nn.LeakyReLU(negative_slope=.05)
+        self.non_linearity = nn.Tanh()
+
+    def forward(self, x):
+
+        D1 = (
+            (x ** 2).sum(-1)[..., None]
+            + (self.mu1 ** 2).sum(-1)[None, :]
+            - 2 * x @ self.mu1.T
+        )
+
+        D2 = (
+            (x ** 2).sum(-1)[..., None]
+            + (self.mu2 ** 2).sum(-1)[None, :]
+            - 2 * x @ self.mu2.T
+        )
+
+        sin_out = (torch.sin(self.sin_network1(x))) * torch.exp(-0.5 * D1 * self.gamma1[None, :]) 
+        cos_out = (torch.cos(self.cos_network1(x))) * torch.exp(-0.5 * D2 * self.gamma2[None, :])
+        encoding = torch.cat((sin_out, cos_out), dim=-1) 
+        
+        out = self.non_linearity(self.l1(encoding)) * torch.exp(-0.5 * self.gamma3[None, :])
+        out = self.relu(self.l2(out))
+        out = self.relu(self.l3(out))
+        out = self.relu(self.l4(out))
         out = torch.sigmoid(self.l5(out))
 
         return out
@@ -94,19 +254,18 @@ class SIREN(nn.Module):
     def __init__(self, input_dim, hidden):
         super(SIREN, self).__init__()
         self.l1 = nn.Linear(input_dim, hidden)
-        self.l1.weight.data.uniform_(-np.sqrt(6/input_dim), np.sqrt(6/input_dim))
-        self.l1.weight.data *= 30
+        self.l1.weight.data.uniform_(-6/np.sqrt(input_dim), 6/np.sqrt(input_dim))
         self.l2 = nn.Linear(hidden, hidden)
-        self.l2.weight.data.uniform_(-np.sqrt(6/hidden), np.sqrt(6/hidden))
+        self.l2.weight.data.uniform_(-6/np.sqrt(hidden), 6/np.sqrt(hidden))
         self.l3 = nn.Linear(hidden, hidden)
-        self.l3.weight.data.uniform_(-np.sqrt(6/hidden), np.sqrt(6/hidden))
+        self.l3.weight.data.uniform_(-6/np.sqrt(hidden), 6/np.sqrt(hidden))
         self.l4 = nn.Linear(hidden, hidden)
-        self.l4.weight.data.uniform_(-np.sqrt(6/hidden), np.sqrt(6/hidden))
+        self.l4.weight.data.uniform_(-6/np.sqrt(hidden), 6/np.sqrt(hidden))
         self.l5 = nn.Linear(hidden, 3)
-        self.l5.weight.data.uniform_(-np.sqrt(6/hidden), np.sqrt(6/hidden))
+        self.l5.weight.data.uniform_(-6/np.sqrt(hidden), 6/np.sqrt(hidden))
 
     def forward(self, x):
-        out = torch.sin(self.l1(x))
+        out = torch.sin(30 * self.l1(x))
         out = torch.sin(self.l2(out))
         out = torch.sin(self.l3(out))
         out = torch.sin(self.l4(out))
@@ -221,6 +380,11 @@ if __name__ == '__main__':
 
     # Training Loop
     # loop through the amount of
+    l1_act = []
+    l2_act = []
+    l3_act = []
+    l4_act = []
+
     for im in test_data:
 
         for encoding in encodings:
@@ -250,8 +414,8 @@ if __name__ == '__main__':
                     model = Filter(inp_batch.shape[2], args.neurons).to(args.device)
                 elif args.model == 'gabor':
                     model = GaborNet(inp_batch.shape[2], args.neurons).to(args.device)
-                elif args.model == 'init':
-                    model = InitNet(inp_batch.shape[2], args.neurons).to(args.device)
+                elif args.model == 'idea':
+                    model = Idea(inp_batch.shape[2], args.neurons).to(args.device)
 
                 # Training criteria
                 criterion = nn.MSELoss()
