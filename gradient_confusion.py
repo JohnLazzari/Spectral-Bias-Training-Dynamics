@@ -19,7 +19,22 @@ import argparse
 from matplotlib import cm
 
 sns.set_style('darkgrid')
-colors = sns.color_palette('pastel')
+colors = sns.color_palette()
+
+def lambda_(model, point, dir, p):
+    return 0
+
+def find_transitions(model, x_0, x_1):
+    p = model(x_0, act=True)
+    p_1 = model(x_1, act=True)
+    d = (x_1 - x_0) / torch.norm(x_1 - x_0)
+    n = 0
+    x = x_0
+    while p_1 != p:
+        # filler 
+        x = 1
+
+    return 0
 
 def get_activation_regions(model, input):
     with torch.no_grad():
@@ -64,7 +79,7 @@ def confusion_within_region(model_raw, inp_target, inp_batch, optim_raw, criteri
                 for j, next_index in enumerate(dict_patterns[pattern][i+1:]):
                     within_region.append(torch.flatten(torchmetrics.functional.pairwise_cosine_similarity(raw_gradients[index].unsqueeze(dim=0), raw_gradients[next_index].unsqueeze(dim=0))).cpu())
 
-    sns.kdeplot(data=torch.cat(within_region).cpu(), fill=True, label='confusion within regions')
+    sns.kdeplot(data=torch.cat(within_region).cpu(), fill=True, label='confusion within regions', color=colors[3])
     plt.legend()
     plt.show()
 
@@ -192,11 +207,11 @@ def main():
 
     # Set up raw_xy network
     model_raw = Net(2, args.neurons).to('cuda:0')
-    optim_raw = torch.optim.Adam(model_raw.parameters(), lr=.001)
+    optim_raw = torch.optim.Adam(model_raw.parameters(), lr=.005)
 
     # Set up sin_cos network
     model_pe = Net(32, args.neurons).to('cuda:0')
-    optim_pe = torch.optim.Adam(model_pe.parameters(), lr=.001)
+    optim_pe = torch.optim.Adam(model_pe.parameters(), lr=.005)
 
     # loss and epochs
     criterion = nn.MSELoss()
@@ -217,6 +232,7 @@ def main():
     grad_norms = args.grad_norms
     # after training
     act_patterns = args.act_patterns
+    plot_loss = False
 
     #################################### Raw xy ###############################################
 
@@ -338,9 +354,13 @@ def main():
         plt.plot(layer_1_norms, label='layer1')
         plt.plot(layer_2_norms, label='layer2')
         plt.plot(layer_3_norms, label='layer3')
+        plt.title('Spectral Norm Coordinates')
+        plt.xlabel('Epochs')
+        plt.ylabel('Layer Norm')
         plt.legend()
         plt.show()
 
+    '''
     if act_patterns:
         # Get num regions for raw_xy
         with torch.no_grad():
@@ -349,14 +369,14 @@ def main():
             print('number of unique activation regions raw_xy: {}'.format(raw_regions))
             plot_patterns(unique_patterns, all_patterns)
             raw_num_patterns.append(raw_regions)
-    
     '''
+    
     if confusion:
         # get confusion within region for raw_xy
-        sns.kdeplot(data=torch.cat(raw_grad_similarities).cpu(), fill=True, label='confusion overall')
+        sns.kdeplot(data=torch.cat(raw_grad_similarities).cpu(), fill=True, label='confusion overall', color=colors[0])
         raw_regions, unique_patterns, all_patterns = get_activation_regions(model_raw, inp_batch)
         confusion_within_region(model_raw, inp_target, inp_batch, optim_raw, criterion, unique_patterns, all_patterns)
-    '''
+
     ######################## Positional Encoding ######################################
 
     # Get the encoding sin cos
@@ -447,7 +467,7 @@ def main():
         # get confusion sin_cos
         if confusion:
             if epoch > epochs-2:
-                pe_gradients = torch.empty([4096, 217731]).to('cuda:0')
+                pe_gradients = torch.empty([4096, 21123]).to('cuda:0')
                 for i, pixel in enumerate(inp_batch):
                     optim_pe.zero_grad()
                     output = model_pe(pixel)
@@ -469,17 +489,20 @@ def main():
 
     if act_patterns:
         # get the regions over loss
-        plt.plot(pe_num_patterns, label='positional encoding')
-        #plt.plot(raw_num_patterns, label='no positional encoding')
+        plt.plot(pe_num_patterns, label='positional encoding', color=colors[0], linewidth=2)
+        plt.plot(raw_num_patterns, label='no positional encoding', color=colors[3], linewidth=2)
+        plt.xlabel('Epochs')
+        plt.ylabel('Num Linear Regions Within Dataset')
         plt.legend()
-        plt.show()
+        plt.savefig('region_growth.png')
 
-    plt.plot(pe_losses, label='positional encoding', color=colors[0], linewidth=2)
-    plt.plot(raw_losses, label='no positional encoding', color=colors[1], linewidth=2)
-    plt.xlabel('Epochs')
-    plt.ylabel('MSE')
-    plt.legend()
-    plt.savefig('losses.png')
+    if plot_loss:
+        plt.plot(pe_losses, label='positional encoding', color=colors[0], linewidth=2)
+        plt.plot(raw_losses, label='no positional encoding', color=colors[3], linewidth=2)
+        plt.xlabel('Epochs')
+        plt.ylabel('MSE')
+        plt.legend()
+        plt.savefig('losses.png')
 
     if grad_norms:
         plt.plot(total_grad_norm_raw, label='raw_grad_norms')
@@ -492,6 +515,9 @@ def main():
         plt.plot(layer_1_norms_pe, label='layer1')
         plt.plot(layer_2_norms_pe, label='layer2')
         plt.plot(layer_3_norms_pe, label='layer3')
+        plt.title('Spectral Norm Positional Encoding')
+        plt.xlabel('Epochs')
+        plt.ylabel('Layer Norm')
         plt.legend()
         plt.show()
 
@@ -529,8 +555,8 @@ def main():
         print('num dead weights: {}'.format(dead_neuron_count))
 
     if confusion:
-        sns.kdeplot(data=torch.cat(sin_cos_grad_similarity).cpu(), fill=True, label='Fourier Features')
-        sns.kdeplot(data=torch.cat(raw_grad_similarities).cpu(), fill=True, label='raw_xy')
+        sns.kdeplot(data=torch.cat(sin_cos_grad_similarity).cpu(), fill=True, label='Fourier Features', color=colors[0])
+        sns.kdeplot(data=torch.cat(raw_grad_similarities).cpu(), fill=True, label='raw_xy', color=colors[3])
         plt.legend()
         plt.savefig('confusion_high_dim.png')
         plt.show()
