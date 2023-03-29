@@ -7,10 +7,30 @@ from PIL import Image
 import cv2
 import numpy as np
 from nerf2D import Positional_Encoding
-from torch_network import Net
 import random
 import torchmetrics
 import seaborn as sns
+
+class Net(nn.Module):
+    def __init__(self, input_dim, hidden):
+        super(Net, self).__init__()
+        self.hidden = hidden
+        self.l1 = nn.Linear(input_dim, hidden)
+        self.l2 = nn.Linear(hidden, hidden)
+        self.l3 = nn.Linear(hidden, hidden)
+        self.l4 = nn.Linear(hidden, hidden)
+        self.l5 = nn.Linear(hidden, 3)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+
+        out = self.relu(self.l1(x))
+        out = self.relu(self.l2(out))
+        out = self.relu(self.l3(out))
+        out = self.relu(self.l4(out))
+        out = self.l5(out)
+
+        return out
 
 def get_data(image, encoding, shuffle, L=10,  batch_size=2048):
 
@@ -57,19 +77,20 @@ def get_data(image, encoding, shuffle, L=10,  batch_size=2048):
 
 def main():
 
-    epochs = 5000
-    L_val = 5
+    epochs = 2500
+    L_val = 16
     input_size = L_val * 4
 
-    model_pe = Net(input_size, 128).to('cuda:0')
+    model_pe = Net(input_size, 512).to('cuda:0')
     optim_pe = torch.optim.Adam(model_pe.parameters(), lr=.001)
 
     criterion = nn.MSELoss()
 
-    im2arr = np.random.randint(0, 255, (64, 64, 3))
+    test_data = np.load('test_data_div2k.npy')
+    test_data = test_data[0]
 
     # Get the encoding sin cos
-    train_inp_batch, train_inp_target = get_data(image=im2arr, encoding='sin_cos', shuffle=True, L=L_val, batch_size=256)
+    train_inp_batch, train_inp_target = get_data(image=test_data, encoding='sin_cos', shuffle=True, L=L_val, batch_size=8192)
 
     for epoch in range(epochs):
         running_loss = 0
@@ -80,21 +101,21 @@ def main():
             running_loss += loss.item()
             loss.backward()
             optim_pe.step()
-        running_loss /= 16
+        running_loss /= 64
         print('Epoch {} Loss: {}'.format(epoch, running_loss))
 
-    # this is only using two layer network from main paper
-    # change to natural images if needed
     with torch.no_grad():
 
         l1_weights = model_pe.l1.weight
-        mask = torch.zeros([128, 128-input_size]).to('cuda:0')
+        mask = torch.zeros([512, 512-input_size]).to('cuda:0')
         l1_weights = torch.cat((l1_weights, mask), dim=1)
 
         l2_weights = model_pe.l2.weight
+        l3_weights = model_pe.l3.weight
+        l4_weights = model_pe.l4.weight
 
-        all_weights = torch.cat((l1_weights, l2_weights), dim=0)
-        angle_matrix_pe = torch.empty([256, 256]).to('cuda')
+        all_weights = torch.cat((l1_weights, l2_weights, l3_weights, l4_weights), dim=0)
+        angle_matrix_pe = torch.empty([2048, 2048]).to('cuda')
 
         # get inner products of gradients for sin_cos
         for i in range(all_weights.shape[0]):
@@ -102,6 +123,8 @@ def main():
 
     plt.matshow(angle_matrix_pe.cpu().numpy(), cmap='seismic', vmin=-1, vmax=1)
     plt.colorbar()
+    plt.tick_params(left = False, right = False , top = False, labelleft = False ,
+                labelbottom = False, labeltop=False, bottom = False)
     plt.show()
 
 if __name__ == '__main__':
