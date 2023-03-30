@@ -77,7 +77,7 @@ def get_data(image, encoding, shuffle, L=10,  batch_size=2048):
 
 def main():
 
-    epochs = 2500
+    epochs = 1
     L_val = 16
     input_size = L_val * 4
 
@@ -125,6 +125,7 @@ def main():
     plt.colorbar()
     plt.tick_params(left = False, right = False , top = False, labelleft = False ,
                 labelbottom = False, labeltop=False, bottom = False)
+    plt.savefig('hyperplane_angles/epoch1_l16.png')
     plt.show()
 
 if __name__ == '__main__':

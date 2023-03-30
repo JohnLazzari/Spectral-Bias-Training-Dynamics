@@ -26,7 +26,9 @@ class Net(nn.Module):
         self.hidden = hidden
         self.l1 = nn.Linear(input_dim, hidden)
         self.l2 = nn.Linear(hidden, hidden)
-        self.l3 = nn.Linear(hidden, 3)
+        self.l3 = nn.Linear(hidden, hidden)
+        self.l4 = nn.Linear(hidden, hidden)
+        self.l5= nn.Linear(hidden, 3)
         self.relu = nn.ReLU()
 
     def forward(self, x, act=False):
@@ -41,13 +43,23 @@ class Net(nn.Module):
         if act:
             act_2 = out_2
 
-        out_3 = self.l3(out_2)
+        out_3 = self.relu(self.l3(out_2))
 
         if act:
-            pattern = torch.cat((act_1, act_2), dim=0).squeeze()
+            act_3 = out_3
+
+        out_4 = self.relu(self.l4(out_3))
+
+        if act:
+            act_4 = out_4
+
+        out_5 = self.l5(out_4)
+
+        if act:
+            pattern = torch.cat((act_1, act_2, act_3, act_4), dim=0).squeeze()
             return pattern
 
-        return out_3
+        return out_5
 
 def compute_confusion(model, optim, x_0, x_1, y_0, y_1):
     # Get confusion between the gradients for both inputs
@@ -61,13 +73,8 @@ def compute_confusion(model, optim, x_0, x_1, y_0, y_1):
     loss_1 = criterion(output, y_0)
     loss_1.backward()
 
-    '''
     grad_1 = torch.cat([torch.flatten(model.l1.weight.grad), torch.flatten(model.l2.weight.grad), torch.flatten(model.l3.weight.grad), torch.flatten(model.l4.weight.grad), torch.flatten(model.l5.weight.grad),
                         torch.flatten(model.l1.bias.grad), torch.flatten(model.l2.bias.grad), torch.flatten(model.l3.bias.grad), torch.flatten(model.l4.bias.grad), torch.flatten(model.l5.bias.grad),
-                        ])
-    '''
-    grad_1 = torch.cat([torch.flatten(model.l1.weight.grad), torch.flatten(model.l2.weight.grad), torch.flatten(model.l3.weight.grad), 
-                        torch.flatten(model.l1.bias.grad), torch.flatten(model.l2.bias.grad), torch.flatten(model.l3.bias.grad)
                         ])
 
     for param in model.parameters():
@@ -76,13 +83,8 @@ def compute_confusion(model, optim, x_0, x_1, y_0, y_1):
     output = model(x_1)
     loss_2 = criterion(output, y_1)
     loss_2.backward()
-    '''
     grad_2 = torch.cat([torch.flatten(model.l1.weight.grad), torch.flatten(model.l2.weight.grad), torch.flatten(model.l3.weight.grad), torch.flatten(model.l4.weight.grad), torch.flatten(model.l5.weight.grad),
                         torch.flatten(model.l1.bias.grad), torch.flatten(model.l2.bias.grad), torch.flatten(model.l3.bias.grad), torch.flatten(model.l4.bias.grad), torch.flatten(model.l5.bias.grad),
-                        ])
-    '''
-    grad_2 = torch.cat([torch.flatten(model.l1.weight.grad), torch.flatten(model.l2.weight.grad), torch.flatten(model.l3.weight.grad), 
-                        torch.flatten(model.l1.bias.grad), torch.flatten(model.l2.bias.grad), torch.flatten(model.l3.bias.grad)
                         ])
 
     # get inner products of gradients
@@ -236,7 +238,8 @@ def train(model, optim, criterion, im, encoding, L, args):
 
         # This gets confusion at the end of training, specify the number of epochs
         if epoch > args.epochs-2:
-            confusion_in_region = confusion_local(model, optim, inp_batch, inp_target, 150)
+            # 100, 50000
+            confusion_in_region = confusion_local(model, optim, inp_batch, inp_target, 100)
             confusion_between_region = confusion_global(model, optim, inp_batch, inp_target, 50000)
 
     return confusion_in_region, confusion_between_region
@@ -245,11 +248,9 @@ def main():
 
     parser = argparse.ArgumentParser(description='Blah.')
     parser.add_argument('--neurons', type=int, default=512, help='Number of neurons per layer')
-    parser.add_argument('--epochs', type=int, default=5000, help='Number of epochs')
-    parser.add_argument('--batch_size', type=int, default=4096, help='make a training and testing set')
+    parser.add_argument('--epochs', type=int, default=1000, help='Number of epochs')
+    parser.add_argument('--batch_size', type=int, default=8192, help='make a training and testing set')
     parser.add_argument('--print_loss', type=bool, default=True, help='print training loss')
-    parser.add_argument('--confusion_in_region', type=bool, default=False, help='doing line count')
-    parser.add_argument('--confusion_between_region', type=bool, default=False, help='doing line count')
     parser.add_argument('--negative', type=bool, default=False, help='-1 to 1')
     parser.add_argument('--train_encoding', action='store_false', default=True, help='train positional encoding')
     parser.add_argument('--train_coordinates', action='store_false', default=True, help='train coordinates')
@@ -258,7 +259,7 @@ def main():
 
     # change image to any in image_demonstration
     test_data = np.load('test_data_div2k.npy')
-    test_data = test_data[:1]
+    test_data = test_data[:5]
 
     L_vals = [4, 8, 16]
     # lists for all confusion for each image
@@ -283,7 +284,7 @@ def main():
         criterion = nn.MSELoss()
 
         if args.train_coordinates:
-            print("Beginning Raw XY Training...")
+            print("\nBeginning Raw XY Training...")
             confusion_within_xy, confusion_between_xy = train(model_raw, optim_raw, criterion, im, 'raw_xy', 0, args)
         
         averaged_global_confusion_xy.append(confusion_between_xy)
@@ -319,19 +320,21 @@ def main():
     averaged_local_confusion_xy = np.array(averaged_local_confusion_xy)
     averaged_local_confusion_xy = averaged_local_confusion_xy.flatten()
 
+    fig1, ax1 = plt.subplots()
     sns.kdeplot(data=averaged_global_confusion_pe[f'4_val'], fill=True, label='L=4')
     sns.kdeplot(data=averaged_global_confusion_pe[f'8_val'], fill=True, label='L=8')
     sns.kdeplot(data=averaged_global_confusion_pe[f'16_val'], fill=True, label='L=16')
     sns.kdeplot(data=averaged_global_confusion_xy, fill=True, label='coordinates')
-    plt.legend(frameon=False)
-    plt.show()
+    fig1.legend()
+    #fig1.savefig('confusion_images/confusion_global_epoch1000')
 
+    fig2, ax2 = plt.subplots()
     sns.kdeplot(data=averaged_local_confusion_pe[f'4_val'], fill=True, label='L=4')
     sns.kdeplot(data=averaged_local_confusion_pe[f'8_val'], fill=True, label='L=8')
     sns.kdeplot(data=averaged_local_confusion_pe[f'16_val'], fill=True, label='L=16')
     sns.kdeplot(data=averaged_local_confusion_xy, fill=True, label='coordinates')
-    plt.legend(frameon=False)
-    plt.show()
+    fig2.legend()
+    #fig2.savefig('confusion_images/confusion_local_epoch1000')
 
 if __name__ == '__main__':
     main()
