@@ -26,7 +26,7 @@ colors = sns.color_palette()
 # Data Generation
 opt = Namespace()
 opt.N = 2048
-opt.K = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
+opt.K = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70]
 opt.A = [1 for _ in opt.K]
 opt.PHI = [np.random.rand() for _ in opt.K]
 device = 'cuda:0'
@@ -37,41 +37,24 @@ class Net(nn.Module):
         self.hidden = hidden
         self.l1 = nn.Linear(input_dim, hidden)
         self.l2 = nn.Linear(hidden, hidden)
-        self.l3 = nn.Linear(hidden, 1)
+        self.l3 = nn.Linear(hidden, hidden)
+        self.l4 = nn.Linear(hidden, hidden)
+        self.l5 = nn.Linear(hidden, 1)
         self.relu = nn.ReLU()
 
     def forward(self, x, act=False):
-        out = self.relu(self.l1(x))
-
-        if act:
-            act_1 = out
-
-        out = self.relu(self.l2(out))
-
-        if act:
-            act_2 = out
-
-        out = self.l3(out)
+        out_1 = self.relu(self.l1(x))
+        out_2 = self.relu(self.l2(out_1))
+        out_3 = self.relu(self.l3(out_2))
+        out_4 = self.relu(self.l4(out_3))
+        out_5 = self.l5(out_4)
 
         if act:
             # using batches, cat along 1st dimension
-            pattern = torch.cat((act_1, act_2), dim=0).squeeze()
+            pattern = torch.cat((out_1, out_2, out_3, out_4), dim=0).squeeze()
             return pattern
 
-        return out
-
-def compute_hamming(model, x_0, x_1):
-
-    # hamming distance
-    with torch.no_grad():
-        pattern_1 = model(x_0, act=True)
-        pattern_1 = set_positive_values_to_one(pattern_1)
-        pattern_2 = model(x_1, act=True)
-        pattern_2 = set_positive_values_to_one(pattern_2)
-
-    hamming = torch.sum(torch.abs(pattern_1-pattern_2))
-
-    return hamming.item()
+        return out_5
 
 def compute_confusion(model, optim, x_0, x_1, y_0, y_1):
     # Get confusion between the gradients for both inputs
@@ -82,27 +65,27 @@ def compute_confusion(model, optim, x_0, x_1, y_0, y_1):
     loss = criterion(output, y_0)
     loss.backward()
 
-    grad_1 = torch.cat([torch.flatten(model.l1.weight.grad), torch.flatten(model.l2.weight.grad), 
-                        torch.flatten(model.l3.weight.grad), torch.flatten(model.l1.bias.grad), 
-                        torch.flatten(model.l2.bias.grad), torch.flatten(model.l3.bias.grad),
+    grad_1 = torch.cat([torch.flatten(model.l1.weight.grad), torch.flatten(model.l2.weight.grad), torch.flatten(model.l3.weight.grad), torch.flatten(model.l4.weight.grad), torch.flatten(model.l5.weight.grad),
+                        torch.flatten(model.l1.bias.grad), torch.flatten(model.l2.bias.grad), torch.flatten(model.l3.bias.grad), torch.flatten(model.l4.bias.grad), torch.flatten(model.l5.bias.grad),
                         ])
 
     optim.zero_grad()
     output = model(x_1)
     loss = criterion(output, y_1)
     loss.backward()
-    grad_2 = torch.cat([torch.flatten(model.l1.weight.grad), torch.flatten(model.l2.weight.grad), 
-                        torch.flatten(model.l3.weight.grad), torch.flatten(model.l1.bias.grad), 
-                        torch.flatten(model.l2.bias.grad), torch.flatten(model.l3.bias.grad),
+    grad_2 = torch.cat([torch.flatten(model.l1.weight.grad), torch.flatten(model.l2.weight.grad), torch.flatten(model.l3.weight.grad), torch.flatten(model.l4.weight.grad), torch.flatten(model.l5.weight.grad),
+                        torch.flatten(model.l1.bias.grad), torch.flatten(model.l2.bias.grad), torch.flatten(model.l3.bias.grad), torch.flatten(model.l4.bias.grad), torch.flatten(model.l5.bias.grad),
                         ])
 
     # get inner products of gradients
     confusion = torchmetrics.functional.pairwise_cosine_similarity(grad_1.unsqueeze(dim=0), 
                                                                 grad_2.unsqueeze(dim=0)).cpu()
+    
+    optim.zero_grad()
 
     return confusion.item()
 
-def hamming_within_regions(model, optim, inp_batch, inp_target, iterations, comp_hamming=True, comp_confusion=True):
+def hamming_within_regions(model, optim, inp_batch, inp_target, iterations):
 
     print('Starting hamming within local regions...')
     hamming_local = []
@@ -117,20 +100,16 @@ def hamming_within_regions(model, optim, inp_batch, inp_target, iterations, comp
         patch_target = inp_target[rand_x-25:rand_x+25]
 
         # get confusion and hamming for every coordinate in the 3x3 region
-        for j in range(500):
+        for j in range(250):
             rand_1 = np.random.randint(0, 49)
             rand_2 = np.random.randint(0, 49)
 
-            if comp_hamming:
-                hamming = compute_hamming(model, patch[rand_1], patch[rand_2])
-                hamming_local.append(hamming)
-            if comp_confusion:
-                confusion = compute_confusion(model, optim, patch[rand_1], patch[rand_2], patch_target[rand_1], patch_target[rand_2])
-                confusion_local.append(confusion)
+            confusion = compute_confusion(model, optim, patch[rand_1], patch[rand_2], patch_target[rand_1], patch_target[rand_2])
+            confusion_local.append(confusion)
 
-    return hamming_local, confusion_local
+    return confusion_local
 
-def hamming_between_regions(model, optim, inp_batch, inp_target, iterations, comp_hamming=True, comp_confusion=True):
+def hamming_between_regions(model, optim, inp_batch, inp_target, iterations):
 
     print('Starting hamming across input space...')
     hamming_between = []
@@ -149,36 +128,10 @@ def hamming_between_regions(model, optim, inp_batch, inp_target, iterations, com
         point_2 = inp_batch[rand_x_2]
         point_2_target = inp_target[rand_x_2]
 
-        if comp_hamming:
-            hamming = compute_hamming(model, point_1, point_2)
-            hamming_between.append(hamming)
-        if comp_confusion:    
-            confusion = compute_confusion(model, optim, point_1, point_2, point_1_target, point_2_target)
-            confusion_between.append(confusion)
+        confusion = compute_confusion(model, optim, point_1, point_2, point_1_target, point_2_target)
+        confusion_between.append(confusion)
 
-    return hamming_between, confusion_between
-
-def set_positive_values_to_one(tensor):
-    # Create a mask that is 1 for positive values and 0 for non-positive values
-    mask = tensor.gt(0.0)
-    # Set all positive values to 1 using the mask
-    tensor[mask] = 1
-    return tensor
-
-def get_activation_regions(model, input):
-    with torch.no_grad():
-        patterns = []
-        # get patterns
-        act_pattern = model(input, act=True)
-        for i, pixel in enumerate(act_pattern):
-            pre_act = set_positive_values_to_one(pixel)
-            patterns.append(list(pre_act.detach().cpu().numpy()))
-        # get the amount of unique patterns
-        unique_patterns = []
-        for pattern in patterns:
-            if pattern not in unique_patterns:
-                unique_patterns.append(pattern)
-    return len(unique_patterns), unique_patterns, patterns
+    return confusion_between
 
 def make_phased_waves(opt):
     t = np.arange(0, 1, 1./opt.N)
@@ -201,11 +154,6 @@ def plot_wave_and_spectrum(opt, x, yox):
     
 def train(model, optim, criterion, x, target, args):
 
-    mean_hamming_within = []
-    std_hamming_within = []
-    mean_hamming_between = []
-    std_hamming_between = []
-
     confusion_in_region = []
     confusion_between_region = []
 
@@ -218,121 +166,106 @@ def train(model, optim, criterion, x, target, args):
         loss.backward()
         optim.step()
 
-        if args.confusion_in_region:
-            if epoch > args.epochs-2:
-                _, confusion_in_region = hamming_within_regions(model, optim, x, target, 100, comp_hamming=False)
+        if epoch > args.epochs-2:
+            confusion_in_region = hamming_within_regions(model, optim, x, target, 50)
+            confusion_between_region = hamming_between_regions(model, optim, x, target, 10000)
 
-        if args.confusion_between_region:
-            if epoch > args.epochs-2:
-                _, confusion_between_region = hamming_between_regions(model, optim, x, target, 10000, comp_hamming=False)
-
-        # hamming distance and min confusion during training
-        # change comp_confusion to true if you want to get the minimum confusion bound
-        if args.mean_hamming_in_region:
-            if epoch % 100 == 0:
-                hamming_in_region, _ = hamming_within_regions(model, optim, x, target, 100, comp_confusion=False)
-                mean_hamming_within.append(np.mean(np.array(hamming_in_region)))
-                std_hamming_within.append(np.std(np.array(hamming_in_region)))
-
-        if args.mean_hamming_between_region:
-            if epoch % 100 == 0:
-                hamming_between_region, _ = hamming_between_regions(model, optim, x, target, 10000, comp_confusion=False)
-                mean_hamming_between.append(np.mean(np.array(hamming_between_region)))
-                std_hamming_between.append(np.std(np.array(hamming_between_region)))
-
-    
-    return confusion_in_region, confusion_between_region, mean_hamming_between, mean_hamming_within, std_hamming_between, std_hamming_within
+    return confusion_in_region, confusion_between_region
 
 def main():
 
     parser = argparse.ArgumentParser(description='Blah.')
     parser.add_argument('--epochs', type=int, default=1000, help='Number of epochs')
-    parser.add_argument('--mean_hamming_in_region', type=bool, default=False, help='doing line count')
-    parser.add_argument('--mean_hamming_between_region', type=bool, default=False, help='doing line count')
-    parser.add_argument('--confusion_in_region', type=bool, default=False, help='doing line count')
-    parser.add_argument('--confusion_between_region', type=bool, default=False, help='doing line count')
+    parser.add_argument('--neurons', type=int, default=128, help='Number of neurons per layer')
 
     args = parser.parse_args()
 
-    # Define model and other training parameters
-    model_raw = Net(1, 256).to(device)
-    optim_raw = optim.Adam(model_raw.parameters(), lr=.001)
+    runs = [1, 2, 3, 4, 5]
 
-    model_pe = Net(12, 256).to(device)
-    optim_pe = optim.Adam(model_pe.parameters(), lr=.001)
+    total_confusion_xy_local = []
+    total_confusion_xy_global = []
 
-    criterion = nn.MSELoss()
+    total_confusion_pe4_local = []
+    total_confusion_pe4_global = []
 
-    epochs = args.epochs
-    yt, x = make_phased_waves(opt)
+    total_confusion_pe8_local = []
+    total_confusion_pe8_global = []
 
-    # make data into tensors, and also add encoding for data, L=5 
+    for run in runs:
 
-    encoding = np.stack((np.sin(np.pi*x), np.cos(np.pi*x), 
-                            np.sin(2*np.pi * x), np.cos(2*np.pi * x),
-                            np.sin(2**2 * np.pi * x), np.cos(2**2 * np.pi * x),
-                            np.sin(2**3 * np.pi * x), np.cos(2**3 * np.pi * x),
-                            np.sin(2**4 * np.pi * x), np.cos(2**4 * np.pi * x),
-                            np.sin(2**5 * np.pi * x), np.cos(2**5 * np.pi * x)), axis=1)
+        # Define model and other training parameters
+        model_raw = Net(1, args.neurons).to(device)
+        optim_raw = optim.Adam(model_raw.parameters(), lr=.001)
 
-    #np.savetxt('spectrogram/orig_function.txt', target)
+        model_pe_4 = Net(8, args.neurons).to(device)
+        optim_pe_4 = optim.Adam(model_pe_4.parameters(), lr=.001)
 
-    # plot preliminary data and spectrogram
-    #plot_wave_and_spectrum(opt, x, yt)
+        model_pe_8 = Net(14, args.neurons).to(device)
+        optim_pe_8 = optim.Adam(model_pe_8.parameters(), lr=.001)
 
-    x = torch.Tensor(x).to(device)
-    x = x.unsqueeze(dim=1)
+        criterion = nn.MSELoss()
 
-    encoding = torch.Tensor(encoding).to(device)
+        yt, x = make_phased_waves(opt)
 
-    target = torch.Tensor(yt).to(device)
-    target = target.unsqueeze(dim=1)
+        # make data into tensors, and also add encoding for data, L=5 
 
-    # Start training loop, will need to evaluate the network at every other iteration to determine the spectrogram and
-    # evaluate through training
-    confusion_within_xy, confusion_between_xy, hamming_between_xy, hamming_within_xy, std_hamming_between_xy, std_hamming_within_xy = train(model_raw, optim_raw, criterion, x, target, args)
-    confusion_within_pe, confusion_between_pe, hamming_between_pe, hamming_within_pe, std_hamming_between_pe, std_hamming_within_pe = train(model_pe, optim_pe, criterion, encoding, target, args)
+        encoding_4 = np.stack((np.sin(np.pi*x), np.cos(np.pi*x), 
+                                np.sin(2*np.pi * x), np.cos(2*np.pi * x),
+                                np.sin(2**2 * np.pi * x), np.cos(2**2 * np.pi * x),
+                                np.sin(2**3 * np.pi * x), np.cos(2**3 * np.pi * x)), axis=1)
 
-    x = np.linspace(0, 1000, 10)
+        encoding_8 = np.stack((np.sin(np.pi*x), np.cos(np.pi*x), 
+                                np.sin(2*np.pi * x), np.cos(2*np.pi * x),
+                                np.sin(2**2 * np.pi * x), np.cos(2**2 * np.pi * x),
+                                np.sin(2**3 * np.pi * x), np.cos(2**3 * np.pi * x),
+                                np.sin(2**4 * np.pi * x), np.cos(2**4 * np.pi * x),
+                                np.sin(2**5 * np.pi * x), np.cos(2**5 * np.pi * x),
+                                np.sin(2**6 * np.pi * x), np.cos(2**6 * np.pi * x)), axis=1)
+        
+        x = torch.Tensor(x).to(device)
+        x = x.unsqueeze(dim=1)
 
-    plt.plot(x, np.array(hamming_between_xy), label='Coordinates')
-    plt.fill_between(x, np.array(hamming_between_xy)+np.array(std_hamming_between_xy), np.array(hamming_between_xy)-np.array(std_hamming_between_xy), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True )
+        encoding_l4 = torch.Tensor(encoding_4).to(device)
+        encoding_l8 = torch.Tensor(encoding_8).to(device)
 
-    plt.plot(x, np.array(hamming_between_pe), label='Positional Encoding')
-    plt.fill_between(x, np.array(hamming_between_pe)+np.array(std_hamming_between_pe), np.array(hamming_between_pe)-np.array(std_hamming_between_pe), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True )
+        target = torch.Tensor(yt).to(device)
+        target = target.unsqueeze(dim=1)
+
+        # Start training loop, will need to evaluate the network at every other iteration to determine the spectrogram and
+        # evaluate through training
+        confusion_within_xy, confusion_between_xy = train(model_raw, optim_raw, criterion, x, target, args)
+        confusion_within_pe4, confusion_between_pe4 = train(model_pe_4, optim_pe_4, criterion, encoding_l4, target, args)
+        confusion_within_pe8, confusion_between_pe8 = train(model_pe_8, optim_pe_8, criterion, encoding_l8, target, args)
+
+        total_confusion_xy_local.append(confusion_within_xy)
+        total_confusion_xy_global.append(confusion_between_xy)
+
+        total_confusion_pe4_local.append(confusion_within_pe4)
+        total_confusion_pe4_global.append(confusion_between_pe4)
+
+        total_confusion_pe8_local.append(confusion_within_pe8)
+        total_confusion_pe8_global.append(confusion_between_pe8)
+
+    total_confusion_xy_local = np.array(total_confusion_xy_local).flatten()
+    total_confusion_xy_global = np.array(total_confusion_xy_global).flatten()
+
+    total_confusion_pe4_local = np.array(total_confusion_pe4_local).flatten()
+    total_confusion_pe4_global = np.array(total_confusion_pe4_global).flatten()
+
+    total_confusion_pe8_local = np.array(total_confusion_pe8_local).flatten()
+    total_confusion_pe8_global = np.array(total_confusion_pe8_global).flatten()
+
+    sns.kdeplot(total_confusion_xy_local, fill=True, label='Coordinates', color=colors[3])
+    sns.kdeplot(total_confusion_pe4_local, fill=True, label='L=3', color=colors[0])
+    sns.kdeplot(total_confusion_pe8_local, fill=True, label='L=6', color=colors[1])
     plt.legend()
     plt.show()
 
-    plt.plot(x, np.array(hamming_within_xy), label='Coordinates')
-    plt.fill_between(x, np.array(hamming_within_xy)+np.array(std_hamming_within_xy), np.array(hamming_within_xy)-np.array(std_hamming_within_xy), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True )
-
-    plt.plot(x, np.array(hamming_within_pe), label='Positional Encoding')
-    plt.fill_between(x, np.array(hamming_within_pe)+np.array(std_hamming_within_pe), np.array(hamming_within_pe)-np.array(std_hamming_within_pe), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True )
+    sns.kdeplot(total_confusion_xy_global, fill=True, label='Coordinates', color=colors[3])
+    sns.kdeplot(total_confusion_pe4_global, fill=True, label='L=3', color=colors[0])
+    sns.kdeplot(total_confusion_pe8_global, fill=True, label='L=6', color=colors[1])
     plt.legend()
     plt.show()
-
-    sns.kdeplot(confusion_within_xy, fill=True, label='Coordinates Local')
-    sns.kdeplot(confusion_within_pe, fill=True, label='Positional Encoding Local')
-    sns.kdeplot(confusion_between_xy, fill=True, label='Coordinates Global')
-    sns.kdeplot(confusion_between_pe, fill=True, label='Positional Encoding Global')
-    plt.legend()
-    plt.show()
-
-    plt.figure(figsize=(9,4)) 
-    with torch.no_grad():
-        out_xy = model_raw(x)
-        out_xy = np.array(out_xy.cpu())
-        out_pe = model_pe(encoding)
-        out_pe = np.array(out_pe.cpu())
-    x = np.array(x.cpu())
-    plt.plot(x, yt, label='Ground Truth')
-    plt.plot(x, out_xy, label='Coordinates', linestyle='dashed')
-    plt.plot(x, out_pe, label='Positional Encoding', linestyle='dashed')
-    plt.legend()
-    plt.xlabel("x")
-    plt.ylabel("f(x)")
-    plt.show()
-
 
 if __name__ == '__main__':
     main()

@@ -77,8 +77,8 @@ def get_data(image, encoding, shuffle, L=10,  batch_size=2048):
 
 def main():
 
-    epochs = 1
-    L_val = 16
+    epochs = 5000
+    L_val = 8
     input_size = L_val * 4
 
     model_pe = Net(input_size, 512).to('cuda:0')
@@ -125,7 +125,7 @@ def main():
     plt.colorbar()
     plt.tick_params(left = False, right = False , top = False, labelleft = False ,
                 labelbottom = False, labeltop=False, bottom = False)
-    plt.savefig('hyperplane_angles/epoch1_l16.png')
+    plt.savefig('hyperplane_angles/epoch5000_l8.png')
     plt.show()
 
 if __name__ == '__main__':
