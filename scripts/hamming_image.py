@@ -174,11 +174,11 @@ def get_data(image, encoding, L=10, batch_size=2048, negative=False, shuffle=Tru
 
     return random_batches, random_targets
 
-def train(model, optim, criterion, im, encoding, L, args):
+def train(model, optim, criterion, im, encoding, L, args, negative=False):
 
     # Get the training data
-    train_inp_batch, train_inp_target = get_data(image=im, encoding=encoding, L=L, batch_size=args.batch_size, negative=args.negative)
-    inp_batch, inp_target = get_data(image=im, encoding=encoding, L=L, batch_size=1, shuffle=False, negative=args.negative)
+    train_inp_batch, train_inp_target = get_data(image=im, encoding=encoding, L=L, batch_size=args.batch_size, negative=negative)
+    inp_batch, inp_target = get_data(image=im, encoding=encoding, L=L, batch_size=1, shuffle=False, negative=negative)
 
     # lists containing values for various experiments
 
@@ -228,7 +228,6 @@ def main():
     parser.add_argument('--epochs', type=int, default=1000, help='Number of epochs')
     parser.add_argument('--batch_size', type=int, default=8192, help='make a training and testing set')
     parser.add_argument('--print_loss', type=bool, default=True, help='print training loss')
-    parser.add_argument('--negative', type=bool, default=False, help='-1 to 1')
     parser.add_argument('--train_encoding', action='store_false', default=True, help='train positional encoding')
     parser.add_argument('--train_coordinates', action='store_false', default=True, help='train coordinates')
 
@@ -242,6 +241,9 @@ def main():
     # lists for all confusion for each image
     averaged_local_hamming_xy = []
     averaged_global_hamming_xy = []
+
+    averaged_local_hamming_neg_xy = []
+    averaged_global_hamming_neg_xy = []
 
     averaged_local_hamming_pe = {}
     averaged_global_hamming_pe = {}
@@ -263,28 +265,39 @@ def main():
         optim_raw = torch.optim.Adam(model_raw.parameters(), lr=.001)
         criterion = nn.MSELoss()
 
-        if args.train_coordinates:
-            print("\nBeginning Raw XY Training...")
-            mean_hamming_within_xy, mean_hamming_between_xy = train(model_raw, optim_raw, criterion, im, 'raw_xy', 0, args)
+        print("\nBeginning Raw XY Training...")
+        mean_hamming_within_xy, mean_hamming_between_xy = train(model_raw, optim_raw, criterion, im, 'raw_xy', 0, args)
         
         averaged_global_hamming_xy.append(mean_hamming_between_xy)
         averaged_local_hamming_xy.append(mean_hamming_within_xy)
 
+        ############################## Larger Normalizing Interval ##################################
+
+        # Set up raw_xy network
+        model_neg = Net(2, args.neurons).to('cuda:0')
+        optim_neg = torch.optim.Adam(model_neg.parameters(), lr=.001)
+        criterion = nn.MSELoss()
+
+        print("\nBeginning Neg XY Training...")
+        mean_hamming_within_neg_xy, mean_hamming_between_neg_xy = train(model_neg, optim_neg, criterion, im, 'raw_xy', 0, args, negative=True)
+        
+        averaged_global_hamming_neg_xy.append(mean_hamming_between_neg_xy)
+        averaged_local_hamming_neg_xy.append(mean_hamming_within_neg_xy)
+
         #################################### Sin Cos #############################################
 
-        if args.train_encoding:
-            print("\nBeginning Positional Encoding Training...")
-            for l in L_vals:
+        print("\nBeginning Positional Encoding Training...")
+        for l in L_vals:
 
-                # Set up pe network
-                model_pe = Net(l*4, args.neurons).to('cuda:0')
-                optim_pe = torch.optim.Adam(model_pe.parameters(), lr=.001)
-                criterion = nn.MSELoss()
+            # Set up pe network
+            model_pe = Net(l*4, args.neurons).to('cuda:0')
+            optim_pe = torch.optim.Adam(model_pe.parameters(), lr=.001)
+            criterion = nn.MSELoss()
 
-                mean_hamming_within_pe, mean_hamming_between_pe = train(model_pe, optim_pe, criterion, im, 'sin_cos', l, args)
+            mean_hamming_within_pe, mean_hamming_between_pe = train(model_pe, optim_pe, criterion, im, 'sin_cos', l, args)
 
-                averaged_global_hamming_pe[f'{l}_val'].append(mean_hamming_between_pe)
-                averaged_local_hamming_pe[f'{l}_val'].append(mean_hamming_within_pe)
+            averaged_global_hamming_pe[f'{l}_val'].append(mean_hamming_between_pe)
+            averaged_local_hamming_pe[f'{l}_val'].append(mean_hamming_within_pe)
     
     x = np.linspace(0, 1000, 20)
 
@@ -307,41 +320,55 @@ def main():
     averaged_local_hamming_xy_std = np.std(averaged_local_hamming_xy, axis=0)
     averaged_local_hamming_xy = np.mean(averaged_local_hamming_xy, axis=0)
 
+    averaged_global_hamming_neg_xy = np.array(averaged_global_hamming_neg_xy)
+    averaged_global_hamming_neg_xy_std = np.std(averaged_global_hamming_neg_xy, axis=0)
+    averaged_global_hamming_neg_xy = np.mean(averaged_global_hamming_neg_xy, axis=0)
+
+    averaged_local_hamming_neg_xy = np.array(averaged_local_hamming_neg_xy)
+    averaged_local_hamming_neg_xy_std = np.std(averaged_local_hamming_neg_xy, axis=0)
+    averaged_local_hamming_neg_xy = np.mean(averaged_local_hamming_neg_xy, axis=0)
+
     # Global Hamming Distances plot
 
     fig1, ax1 = plt.subplots()
-    ax1.plot(x, averaged_global_hamming_pe[f'4_val'], label='L=4', linewidth=2)
+    ax1.plot(x, averaged_global_hamming_pe[f'4_val'], label='Encoding L=4', linewidth=2)
     ax1.fill_between(x, np.array(averaged_global_hamming_pe[f'4_val'])+np.array(averaged_global_hamming_pe_std[f'4_val']), np.array(averaged_global_hamming_pe[f'4_val'])-np.array(averaged_global_hamming_pe_std[f'4_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
-    ax1.plot(x, averaged_global_hamming_pe[f'8_val'], label='L=8', linewidth=2)
+    ax1.plot(x, averaged_global_hamming_pe[f'8_val'], label='Encoding L=8', linewidth=2)
     ax1.fill_between(x, np.array(averaged_global_hamming_pe[f'8_val'])+np.array(averaged_global_hamming_pe_std[f'8_val']), np.array(averaged_global_hamming_pe[f'8_val'])-np.array(averaged_global_hamming_pe_std[f'8_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
-    ax1.plot(x, averaged_global_hamming_pe[f'16_val'], label='L=16', linewidth=2)
+    ax1.plot(x, averaged_global_hamming_pe[f'16_val'], label='Encoding L=16', linewidth=2)
     ax1.fill_between(x, np.array(averaged_global_hamming_pe[f'16_val'])+np.array(averaged_global_hamming_pe_std[f'16_val']), np.array(averaged_global_hamming_pe[f'16_val'])-np.array(averaged_global_hamming_pe_std[f'16_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
-    ax1.plot(x, averaged_global_hamming_xy, label='coordinates', linewidth=2)
+    ax1.plot(x, averaged_global_hamming_xy, label='Coordinates [0,1]', linewidth=2)
     ax1.fill_between(x, np.array(averaged_global_hamming_xy)+np.array(averaged_global_hamming_xy_std), np.array(averaged_global_hamming_xy)-np.array(averaged_global_hamming_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
+    ax1.plot(x, averaged_global_hamming_neg_xy, label='Coordinates [-1,1]', linewidth=2)
+    ax1.fill_between(x, np.array(averaged_global_hamming_neg_xy)+np.array(averaged_global_hamming_neg_xy_std), np.array(averaged_global_hamming_neg_xy)-np.array(averaged_global_hamming_neg_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+
     ax1.legend()
-    fig1.savefig('hamming_images/hamming_global')
+    fig1.savefig('hamming_images/hamming_global_run2')
 
     # Local hamming distances plot
 
     fig2, ax2 = plt.subplots()
-    ax2.plot(x, averaged_local_hamming_pe[f'4_val'], label='L=4', linewidth=2)
+    ax2.plot(x, averaged_local_hamming_pe[f'4_val'], label='Encoding L=4', linewidth=2)
     ax2.fill_between(x, np.array(averaged_local_hamming_pe[f'4_val'])+np.array(averaged_local_hamming_pe_std[f'4_val']), np.array(averaged_local_hamming_pe[f'4_val'])-np.array(averaged_local_hamming_pe_std[f'4_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
-    ax2.plot(x, averaged_local_hamming_pe[f'8_val'], label='L=8', linewidth=2)
+    ax2.plot(x, averaged_local_hamming_pe[f'8_val'], label='Encoding L=8', linewidth=2)
     ax2.fill_between(x, np.array(averaged_local_hamming_pe[f'8_val'])+np.array(averaged_local_hamming_pe_std[f'8_val']), np.array(averaged_local_hamming_pe[f'8_val'])-np.array(averaged_local_hamming_pe_std[f'8_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
-    ax2.plot(x, averaged_local_hamming_pe[f'16_val'], label='L=16', linewidth=2)
+    ax2.plot(x, averaged_local_hamming_pe[f'16_val'], label='Encoding L=16', linewidth=2)
     ax2.fill_between(x, np.array(averaged_local_hamming_pe[f'16_val'])+np.array(averaged_local_hamming_pe_std[f'16_val']), np.array(averaged_local_hamming_pe[f'16_val'])-np.array(averaged_local_hamming_pe_std[f'16_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
-    ax2.plot(x, averaged_local_hamming_xy, label='coordinates', linewidth=2)
+    ax2.plot(x, averaged_local_hamming_xy, label='Coordinates [0,1]', linewidth=2)
     ax2.fill_between(x, np.array(averaged_local_hamming_xy)+np.array(averaged_local_hamming_xy_std), np.array(averaged_local_hamming_xy)-np.array(averaged_local_hamming_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
+    ax2.plot(x, averaged_local_hamming_neg_xy, label='Coordinates [-1,1]', linewidth=2)
+    ax2.fill_between(x, np.array(averaged_local_hamming_neg_xy)+np.array(averaged_local_hamming_neg_xy_std), np.array(averaged_local_hamming_neg_xy)-np.array(averaged_local_hamming_neg_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+
     ax2.legend()
-    fig2.savefig('hamming_images/hamming_local')
+    fig2.savefig('hamming_images/hamming_local_run2')
 
 if __name__ == '__main__':
     main()

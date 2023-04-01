@@ -172,7 +172,7 @@ def get_data(image, encoding, L=10, batch_size=2048, negative=False, shuffle=Tru
     inp_batch, inp_target, ind_vals = PE.get_dataset(L, negative=negative)
 
     inp_batch, inp_target = torch.Tensor(inp_batch), torch.Tensor(inp_target)
-    inp_batch, inp_target = inp_batch.to('cuda:0'), inp_target.to('cuda:0')
+    inp_batch, inp_target = inp_batch.to('cuda:1'), inp_target.to('cuda:1')
 
     # create batches to track batch loss and show it is more stable due to gabor encoding
     full_batches = []
@@ -202,11 +202,11 @@ def get_data(image, encoding, L=10, batch_size=2048, negative=False, shuffle=Tru
 
     return random_batches, random_targets
 
-def train(model, optim, criterion, im, encoding, L, args):
+def train(model, optim, criterion, im, encoding, L, args, negative=False):
 
     # Get the training data
-    train_inp_batch, train_inp_target = get_data(image=im, encoding=encoding, L=L, batch_size=args.batch_size, negative=args.negative)
-    inp_batch, inp_target = get_data(image=im, encoding=encoding, L=L, batch_size=1, shuffle=False, negative=args.negative)
+    train_inp_batch, train_inp_target = get_data(image=im, encoding=encoding, L=L, batch_size=args.batch_size, negative=negative)
+    inp_batch, inp_target = get_data(image=im, encoding=encoding, L=L, batch_size=1, shuffle=False, negative=negative)
 
     confusion_in_region = []
     confusion_between_region = []
@@ -251,9 +251,6 @@ def main():
     parser.add_argument('--epochs', type=int, default=1000, help='Number of epochs')
     parser.add_argument('--batch_size', type=int, default=8192, help='make a training and testing set')
     parser.add_argument('--print_loss', type=bool, default=True, help='print training loss')
-    parser.add_argument('--negative', type=bool, default=False, help='-1 to 1')
-    parser.add_argument('--train_encoding', action='store_false', default=True, help='train positional encoding')
-    parser.add_argument('--train_coordinates', action='store_false', default=True, help='train coordinates')
 
     args = parser.parse_args()
 
@@ -265,6 +262,9 @@ def main():
     # lists for all confusion for each image
     averaged_local_confusion_xy = []
     averaged_global_confusion_xy = []
+
+    averaged_local_confusion_neg_xy = []
+    averaged_global_confusion_neg_xy = []
 
     averaged_local_confusion_pe = {}
     averaged_global_confusion_pe = {}
@@ -279,62 +279,72 @@ def main():
         #################################### Raw XY ##############################################
 
         # Set up raw_xy network
-        model_raw = Net(2, args.neurons).to('cuda:0')
+        model_raw = Net(2, args.neurons).to('cuda:1')
         optim_raw = torch.optim.Adam(model_raw.parameters(), lr=.001)
         criterion = nn.MSELoss()
 
-        if args.train_coordinates:
-            print("\nBeginning Raw XY Training...")
-            confusion_within_xy, confusion_between_xy = train(model_raw, optim_raw, criterion, im, 'raw_xy', 0, args)
+        print("\nBeginning Raw XY Training...")
+        confusion_within_xy, confusion_between_xy = train(model_raw, optim_raw, criterion, im, 'raw_xy', 0, args)
         
         averaged_global_confusion_xy.append(confusion_between_xy)
         averaged_local_confusion_xy.append(confusion_within_xy)
 
+        ################################## larger normalizing interval ###########################
+
+        model_neg = Net(2, args.neurons).to('cuda:1')
+        optim_neg = torch.optim.Adam(model_neg.parameters(), lr=.001)
+
+        print("\nBeginning Neg Raw XY Training...")
+        confusion_within_neg_xy, confusion_between_neg_xy = train(model_neg, optim_neg, criterion, im, 'raw_xy', 0, args, negative=True)
+        
+        averaged_global_confusion_neg_xy.append(confusion_between_neg_xy)
+        averaged_local_confusion_neg_xy.append(confusion_within_neg_xy)
+
         #################################### Sin Cos #############################################
 
-        if args.train_encoding:
-            print("\nBeginning Positional Encoding Training...")
-            for l in L_vals:
+        print("\nBeginning Positional Encoding Training...")
+        for l in L_vals:
 
-                # Set up pe network
-                model_pe = Net(l*4, args.neurons).to('cuda:0')
-                optim_pe = torch.optim.Adam(model_pe.parameters(), lr=.001)
-                criterion = nn.MSELoss()
+            # Set up pe network
+            model_pe = Net(l*4, args.neurons).to('cuda:1')
+            optim_pe = torch.optim.Adam(model_pe.parameters(), lr=.001)
+            criterion = nn.MSELoss()
 
-                confusion_within_pe, confusion_between_pe = train(model_pe, optim_pe, criterion, im, 'sin_cos', l, args)
+            confusion_within_pe, confusion_between_pe = train(model_pe, optim_pe, criterion, im, 'sin_cos', l, args)
 
-                averaged_global_confusion_pe[f'{l}_val'].append(confusion_between_pe)
-                averaged_local_confusion_pe[f'{l}_val'].append(confusion_within_pe)
+            averaged_global_confusion_pe[f'{l}_val'].append(confusion_between_pe)
+            averaged_local_confusion_pe[f'{l}_val'].append(confusion_within_pe)
+    
+    ##################################### Plotting Data ###########################################
 
     for l in L_vals:
 
-        averaged_global_confusion_pe[f'{l}_val'] = np.array(averaged_global_confusion_pe[f'{l}_val'])
-        averaged_global_confusion_pe[f'{l}_val'] = averaged_global_confusion_pe[f'{l}_val'].flatten()
+        averaged_global_confusion_pe[f'{l}_val'] = np.array(averaged_global_confusion_pe[f'{l}_val']).flatten()
+        averaged_local_confusion_pe[f'{l}_val'] = np.array(averaged_local_confusion_pe[f'{l}_val']).flatten()
 
-        averaged_local_confusion_pe[f'{l}_val'] = np.array(averaged_local_confusion_pe[f'{l}_val'])
-        averaged_local_confusion_pe[f'{l}_val'] = averaged_local_confusion_pe[f'{l}_val'].flatten()
+    averaged_global_confusion_xy = np.array(averaged_global_confusion_xy).flatten()
+    averaged_local_confusion_xy = np.array(averaged_local_confusion_xy).flatten()
 
-    averaged_global_confusion_xy = np.array(averaged_global_confusion_xy)
-    averaged_global_confusion_xy = averaged_global_confusion_xy.flatten()
-
-    averaged_local_confusion_xy = np.array(averaged_local_confusion_xy)
-    averaged_local_confusion_xy = averaged_local_confusion_xy.flatten()
+    averaged_global_confusion_neg_xy = np.array(averaged_global_confusion_neg_xy).flatten()
+    averaged_local_confusion_neg_xy = np.array(averaged_local_confusion_neg_xy).flatten()
 
     fig1, ax1 = plt.subplots()
-    sns.kdeplot(data=averaged_global_confusion_pe[f'4_val'], fill=True, label='L=4')
-    sns.kdeplot(data=averaged_global_confusion_pe[f'8_val'], fill=True, label='L=8')
-    sns.kdeplot(data=averaged_global_confusion_pe[f'16_val'], fill=True, label='L=16')
-    sns.kdeplot(data=averaged_global_confusion_xy, fill=True, label='coordinates')
+    sns.kdeplot(data=averaged_global_confusion_pe[f'4_val'], fill=True, label='Encoding L=4')
+    sns.kdeplot(data=averaged_global_confusion_pe[f'8_val'], fill=True, label='Encoding L=8')
+    sns.kdeplot(data=averaged_global_confusion_pe[f'16_val'], fill=True, label='Encoding L=16')
+    sns.kdeplot(data=averaged_global_confusion_xy, fill=True, label='Coordinates [0,1]')
+    sns.kdeplot(data=averaged_global_confusion_neg_xy, fill=True, label='Coordinates [-1,1]')
     fig1.legend()
-    #fig1.savefig('confusion_images/confusion_global_epoch1000')
+    fig1.savefig('confusion_images/confusion_global_run2_epoch1000')
 
     fig2, ax2 = plt.subplots()
-    sns.kdeplot(data=averaged_local_confusion_pe[f'4_val'], fill=True, label='L=4')
-    sns.kdeplot(data=averaged_local_confusion_pe[f'8_val'], fill=True, label='L=8')
-    sns.kdeplot(data=averaged_local_confusion_pe[f'16_val'], fill=True, label='L=16')
-    sns.kdeplot(data=averaged_local_confusion_xy, fill=True, label='coordinates')
+    sns.kdeplot(data=averaged_local_confusion_pe[f'4_val'], fill=True, label='Encoding L=4')
+    sns.kdeplot(data=averaged_local_confusion_pe[f'8_val'], fill=True, label='Encoding L=8')
+    sns.kdeplot(data=averaged_local_confusion_pe[f'16_val'], fill=True, label='Encoding L=16')
+    sns.kdeplot(data=averaged_local_confusion_xy, fill=True, label='Coordinates [0,1]')
+    sns.kdeplot(data=averaged_local_confusion_neg_xy, fill=True, label='Coordinates [-1,1]')
     fig2.legend()
-    #fig2.savefig('confusion_images/confusion_local_epoch1000')
+    fig2.savefig('confusion_images/confusion_local_run2_epoch1000')
 
 if __name__ == '__main__':
     main()
