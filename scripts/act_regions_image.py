@@ -174,11 +174,11 @@ def get_data(image, encoding, L=10, batch_size=2048, negative=False, shuffle=Tru
 
     return random_batches, random_targets
 
-def train(model, optim, criterion, im, encoding, L, args):
+def train(model, optim, criterion, im, encoding, L, args, negative=False):
 
     # Get the training data
-    train_inp_batch, train_inp_target = get_data(image=im, encoding=encoding, L=L, batch_size=args.batch_size, negative=args.negative)
-    inp_batch, inp_target = get_data(image=im, encoding=encoding, L=L, batch_size=1, shuffle=False, negative=args.negative)
+    train_inp_batch, train_inp_target = get_data(image=im, encoding=encoding, L=L, batch_size=args.batch_size, negative=negative)
+    inp_batch, inp_target = get_data(image=im, encoding=encoding, L=L, batch_size=1, shuffle=False, negative=negative)
 
     # lists containing values for various experiments
     num_patterns = []
@@ -209,10 +209,10 @@ def train(model, optim, criterion, im, encoding, L, args):
         losses.append(epoch_loss)
 
         # Get activation region count
-        if epoch % 100 == 0:
+        if epoch % 50 == 0:
             print('Counting activation patterns...')
             raw_regions, unique_patterns, all_patterns = get_activation_regions(model, inp_batch)
-            print('number of unique activation regions raw_xy: {}'.format(raw_regions))
+            print('number of unique activation regions: {}'.format(raw_regions))
             num_patterns.append(raw_regions)
 
     return num_patterns, losses
@@ -224,9 +224,6 @@ def main():
     parser.add_argument('--epochs', type=int, default=1000, help='Number of epochs')
     parser.add_argument('--batch_size', type=int, default=8192, help='make a training and testing set')
     parser.add_argument('--print_loss', type=bool, default=True, help='print training loss')
-    parser.add_argument('--act_patterns', type=bool, default=False, help='check number of unique activation patterns')
-    parser.add_argument('--negative', type=bool, default=False, help='-1 to 1')
-    parser.add_argument('--visualize_regions', type=bool, default=False, help='plot the losses')
     parser.add_argument('--train_encoding', action='store_false', default=True, help='train positional encoding')
     parser.add_argument('--train_coordinates', action='store_false', default=True, help='train coordinates')
 
@@ -234,9 +231,21 @@ def main():
 
     # change image to any in image_demonstration
     test_data = np.load('test_data_div2k.npy')
-    test_data = test_data[:5]
+    test_data = test_data[:3]
 
-    L_vals = [1, 2]
+    criterion = nn.MSELoss()
+
+    L_vals = [1, 2, 8]
+
+    # lists for all confusion for each image
+    averaged_patterns_xy = []
+    averaged_patterns_neg_xy = []
+    averaged_patterns_pe = {}
+    averaged_patterns_pe_std = {}
+
+    for l in L_vals:
+        averaged_patterns_pe[f'{l}_val'] = []
+        averaged_patterns_pe_std[f'{l}_val'] = []
 
     # Go through each image individually
     for im in test_data:
@@ -246,12 +255,23 @@ def main():
         # Set up raw_xy network
         model_raw = Net(2, args.neurons).to('cuda:0')
         optim_raw = torch.optim.Adam(model_raw.parameters(), lr=.001)
-        criterion = nn.MSELoss()
 
         if args.train_coordinates:
             print("\nBeginning Raw XY Training...")
             xy_num_patterns, xy_losses = train(model_raw, optim_raw, criterion, im, 'raw_xy', 0, args)
 
+        averaged_patterns_xy.append(xy_num_patterns)
+
+        ################################## larger normalizing interval ###########################
+
+        model_neg = Net(2, args.neurons).to('cuda:0')
+        optim_neg = torch.optim.Adam(model_neg.parameters(), lr=.001)
+
+        print("\nBeginning Neg Raw XY Training...")
+        neg_num_patterns, neg_losses = train(model_neg, optim_neg, criterion, im, 'raw_xy', 0, args, negative=True)
+
+        averaged_patterns_neg_xy.append(neg_num_patterns)
+        
         #################################### Sin Cos #############################################
 
         if args.train_encoding:
@@ -265,7 +285,44 @@ def main():
 
                 pe_num_patterns, pe_losses = train(model_pe, optim_pe, criterion, im, 'sin_cos', l, args)
 
-    x = np.linspace(0, 1000, 40)
+                averaged_patterns_pe[f'{l}_val'].append(pe_num_patterns)
+
+    x = np.linspace(0, 1000, 20)
+
+    for l in L_vals:
+
+        averaged_patterns_pe[f'{l}_val'] = np.array(averaged_patterns_pe[f'{l}_val'])
+        averaged_patterns_pe_std[f'{l}_val'] = np.std(averaged_patterns_pe[f'{l}_val'], axis=0)
+        averaged_patterns_pe[f'{l}_val'] = np.mean(averaged_patterns_pe[f'{l}_val'], axis=0)
+
+    averaged_patterns_xy = np.array(averaged_patterns_xy)
+    averaged_patterns_xy_std = np.std(averaged_patterns_xy, axis=0)
+    averaged_patterns_xy = np.mean(averaged_patterns_xy, axis=0)
+
+    averaged_patterns_neg_xy = np.array(averaged_patterns_neg_xy)
+    averaged_patterns_neg_xy_std = np.std(averaged_patterns_neg_xy, axis=0)
+    averaged_patterns_neg_xy = np.mean(averaged_patterns_neg_xy, axis=0)
+
+    fig1, ax1 = plt.subplots()
+    ax1.plot(x, averaged_patterns_pe[f'1_val'], label='Encoding L=1', linewidth=2)
+    ax1.fill_between(x, np.array(averaged_patterns_pe[f'1_val'])+np.array(averaged_patterns_pe_std[f'1_val']), np.array(averaged_patterns_pe[f'1_val'])-np.array(averaged_patterns_pe_std[f'1_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+
+    ax1.plot(x, averaged_patterns_pe[f'2_val'], label='Encoding L=2', linewidth=2)
+    ax1.fill_between(x, np.array(averaged_patterns_pe[f'2_val'])+np.array(averaged_patterns_pe_std[f'2_val']), np.array(averaged_patterns_pe[f'2_val'])-np.array(averaged_patterns_pe_std[f'2_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+
+    ax1.plot(x, averaged_patterns_pe[f'8_val'], label='Encoding L=8', linewidth=2)
+    ax1.fill_between(x, np.array(averaged_patterns_pe[f'8_val'])+np.array(averaged_patterns_pe_std[f'8_val']), np.array(averaged_patterns_pe[f'8_val'])-np.array(averaged_patterns_pe_std[f'8_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+
+    ax1.plot(x, averaged_patterns_xy, label='Coordinates [0,1]', linewidth=2)
+    ax1.fill_between(x, np.array(averaged_patterns_xy)+np.array(averaged_patterns_xy_std), np.array(averaged_patterns_xy)-np.array(averaged_patterns_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+
+    ax1.plot(x, averaged_patterns_neg_xy, label='Coordinates [-1,1]', linewidth=2)
+    ax1.fill_between(x, np.array(averaged_patterns_neg_xy)+np.array(averaged_patterns_neg_xy_std), np.array(averaged_patterns_neg_xy)-np.array(averaged_patterns_neg_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+
+    ax1.legend()
+    plt.xlabel("Epochs")
+    plt.ylabel("Num Activation Regions")
+    fig1.savefig('act_region_growth/act_pattern_growth')
 
 if __name__ == '__main__':
     main()
