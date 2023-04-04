@@ -103,17 +103,19 @@ def get_data(image, encoding, L=10, batch_size=2048, negative=False, shuffle=Tru
 
     return random_batches, random_targets
 
-def train(model, optim, criterion, im, encoding, L, args):
+def train(model, optim, criterion, im, encoding, L, args, negative=False):
 
     # Get the training data
-    train_inp_batch, train_inp_target = get_data(image=im, encoding=encoding, L=L, batch_size=args.batch_size, negative=args.negative)
+    train_inp_batch, train_inp_target = get_data(image=im, encoding=encoding, L=L, batch_size=args.batch_size, negative=negative)
 
     # lists containing values for various experiments
     param_norms = []
 
     layer_1_norms = []
-    layer_3_norms = []
     layer_2_norms = []
+    layer_3_norms = []
+    layer_4_norms = []
+    layer_5_norms = []
 
     losses = []
 
@@ -147,16 +149,27 @@ def train(model, optim, criterion, im, encoding, L, args):
             U, S, V = torch.linalg.svd(model.l1.weight)
             norm_1 = max(S)
             layer_1_norms.append(norm_1.item())
+
             U, S, V = torch.linalg.svd(model.l2.weight)
             norm_2 = max(S)
             layer_2_norms.append(norm_2.item())
+
             U, S, V = torch.linalg.svd(model.l3.weight)
             norm_3 = max(S)
             layer_3_norms.append(norm_3.item())
-            total_norm = norm_1 * norm_2 * norm_3
+
+            U, S, V = torch.linalg.svd(model.l4.weight)
+            norm_4 = max(S)
+            layer_4_norms.append(norm_4.item())
+
+            U, S, V = torch.linalg.svd(model.l5.weight)
+            norm_5 = max(S)
+            layer_5_norms.append(norm_5.item())
+
+            total_norm = norm_1 * norm_2 * norm_3 * norm_4 * norm_5
             param_norms.append(total_norm.item())
 
-    return param_norms, layer_1_norms, layer_2_norms, layer_3_norms
+    return param_norms, layer_1_norms, layer_2_norms, layer_3_norms, layer_4_norms, layer_5_norms
 
 def main():
 
@@ -176,20 +189,51 @@ def main():
     test_data = np.load('test_data_div2k.npy')
     test_data = test_data[:5]
 
-    L_vals = [4, 8, 16]
+    L_vals = [4, 8]
     # lists for all confusion for each image
-    averaged_local_hamming_xy = []
-    averaged_global_hamming_xy = []
+    averaged_param_norms_xy = []
+    averaged_param_norms_layer1_xy = []
+    averaged_param_norms_layer2_xy = []
+    averaged_param_norms_layer3_xy = []
+    averaged_param_norms_layer4_xy = []
+    averaged_param_norms_layer5_xy = []
 
-    averaged_local_hamming_pe = {}
-    averaged_global_hamming_pe = {}
+    averaged_param_norms_neg_xy = []
+    averaged_param_norms_layer1_neg_xy = []
+    averaged_param_norms_layer2_neg_xy = []
+    averaged_param_norms_layer3_neg_xy = []
+    averaged_param_norms_layer4_neg_xy = []
+    averaged_param_norms_layer5_neg_xy = []
 
-    averaged_local_hamming_pe_std = {}
-    averaged_global_hamming_pe_std = {}
+    averaged_param_norms_pe = {}
+    averaged_param_norms_layer1_pe = {}
+    averaged_param_norms_layer2_pe = {}
+    averaged_param_norms_layer3_pe = {}
+    averaged_param_norms_layer4_pe = {}
+    averaged_param_norms_layer5_pe = {}
+
+    averaged_param_norms_pe_std = {}
+    averaged_param_norms_layer1_pe_std = {}
+    averaged_param_norms_layer2_pe_std = {}
+    averaged_param_norms_layer3_pe_std = {}
+    averaged_param_norms_layer4_pe_std = {}
+    averaged_param_norms_layer5_pe_std = {}
 
     for l in L_vals:
-        averaged_local_hamming_pe[f'{l}_val'] = []
-        averaged_global_hamming_pe[f'{l}_val'] = []
+
+        averaged_param_norms_pe[f'{l}_val'] = []
+        averaged_param_norms_layer1_pe[f'{l}_val'] = []
+        averaged_param_norms_layer2_pe[f'{l}_val'] = []
+        averaged_param_norms_layer3_pe[f'{l}_val'] = []
+        averaged_param_norms_layer4_pe[f'{l}_val'] = []
+        averaged_param_norms_layer5_pe[f'{l}_val'] = []
+
+        averaged_param_norms_pe_std[f'{l}_val'] = []
+        averaged_param_norms_layer1_pe_std[f'{l}_val'] = []
+        averaged_param_norms_layer2_pe_std[f'{l}_val'] = []
+        averaged_param_norms_layer3_pe_std[f'{l}_val'] = []
+        averaged_param_norms_layer4_pe_std[f'{l}_val'] = []
+        averaged_param_norms_layer5_pe_std[f'{l}_val'] = []
 
     # Go through each image individually
     for im in test_data:
@@ -203,10 +247,29 @@ def main():
 
         if args.train_coordinates:
             print("\nBeginning Raw XY Training...")
-            xy_param_norms, xy_layer_1_norms, xy_layer_2_norms, xy_layer_3_norms = train(model_raw, optim_raw, criterion, im, 'raw_xy', 0, args)
+            xy_param_norms, xy_layer_1_norms, xy_layer_2_norms, xy_layer_3_norms, xy_layer_4_norms, xy_layer_5_norms = train(model_raw, optim_raw, criterion, im, 'raw_xy', 0, args)
         
-        averaged_global_hamming_xy.append(mean_hamming_between_xy)
-        averaged_local_hamming_xy.append(mean_hamming_within_xy)
+        averaged_param_norms_xy.append(xy_param_norms)
+        averaged_param_norms_layer1_xy.append(xy_layer_1_norms)
+        averaged_param_norms_layer2_xy.append(xy_layer_2_norms)
+        averaged_param_norms_layer3_xy.append(xy_layer_3_norms)
+        averaged_param_norms_layer4_xy.append(xy_layer_4_norms)
+        averaged_param_norms_layer5_xy.append(xy_layer_5_norms)
+
+        ################################## larger normalizing interval ###########################
+
+        model_neg = Net(2, args.neurons).to('cuda:1')
+        optim_neg = torch.optim.Adam(model_neg.parameters(), lr=.001)
+
+        print("\nBeginning Neg Raw XY Training...")
+        neg_param_norms, neg_layer_1_norms, neg_layer_2_norms, neg_layer_3_norms, neg_layer_4_norms, neg_layer_5_norms = train(model_neg, optim_neg, criterion, im, 'raw_xy', 0, args, negative=True)
+        
+        averaged_param_norms_neg_xy.append(neg_param_norms)
+        averaged_param_norms_layer1_neg_xy.append(neg_layer_1_norms)
+        averaged_param_norms_layer2_neg_xy.append(neg_layer_2_norms)
+        averaged_param_norms_layer3_neg_xy.append(neg_layer_3_norms)
+        averaged_param_norms_layer4_neg_xy.append(neg_layer_4_norms)
+        averaged_param_norms_layer5_neg_xy.append(neg_layer_5_norms)
 
         #################################### Sin Cos #############################################
 
@@ -219,67 +282,156 @@ def main():
                 optim_pe = torch.optim.Adam(model_pe.parameters(), lr=.001)
                 criterion = nn.MSELoss()
 
-                pe_param_norms, pe_layer_1_norms, pe_layer_2_norms, pe_layer_3_norms = train(model_pe, optim_pe, criterion, im, 'sin_cos', l, args)
+                pe_param_norms, pe_layer_1_norms, pe_layer_2_norms, pe_layer_3_norms, pe_layer_4_norms, pe_layer_5_norms = train(model_pe, optim_pe, criterion, im, 'sin_cos', l, args)
 
-                averaged_global_hamming_pe[f'{l}_val'].append(mean_hamming_between_pe)
-                averaged_local_hamming_pe[f'{l}_val'].append(mean_hamming_within_pe)
+                averaged_param_norms_pe[f'{l}_val'].append(pe_param_norms)
+                averaged_param_norms_layer1_pe[f'{l}_val'].append(pe_layer_1_norms)
+                averaged_param_norms_layer2_pe[f'{l}_val'].append(pe_layer_2_norms)
+                averaged_param_norms_layer3_pe[f'{l}_val'].append(pe_layer_3_norms)
+                averaged_param_norms_layer4_pe[f'{l}_val'].append(pe_layer_4_norms)
+                averaged_param_norms_layer5_pe[f'{l}_val'].append(pe_layer_5_norms)
     
-    x = np.linspace(0, 1000, 40)
+    x = np.linspace(0, 1000, 1000)
 
     # Get mean and std across images
     for l in L_vals:
 
-        averaged_global_hamming_pe[f'{l}_val'] = np.array(averaged_global_hamming_pe[f'{l}_val'])
-        averaged_global_hamming_pe_std[f'{l}_val'] = np.std(averaged_global_hamming_pe[f'{l}_val'], axis=0)
-        averaged_global_hamming_pe[f'{l}_val'] = np.mean(averaged_global_hamming_pe[f'{l}_val'], axis=0)
+        averaged_param_norms_pe[f'{l}_val'] = np.array(averaged_param_norms_pe[f'{l}_val'])
+        averaged_param_norms_pe_std[f'{l}_val'] = np.std(averaged_param_norms_pe[f'{l}_val'], axis=0)
+        averaged_param_norms_pe[f'{l}_val'] = np.mean(averaged_param_norms_pe[f'{l}_val'], axis=0)
 
-        averaged_local_hamming_pe[f'{l}_val'] = np.array(averaged_local_hamming_pe[f'{l}_val'])
-        averaged_local_hamming_pe_std[f'{l}_val'] = np.std(averaged_local_hamming_pe[f'{l}_val'], axis=0)
-        averaged_local_hamming_pe[f'{l}_val'] = np.mean(averaged_local_hamming_pe[f'{l}_val'], axis=0)
+        averaged_param_norms_layer1_pe[f'{l}_val'] = np.array(averaged_param_norms_layer1_pe[f'{l}_val'])
+        averaged_param_norms_layer1_pe_std[f'{l}_val'] = np.std(averaged_param_norms_layer1_pe[f'{l}_val'], axis=0)
+        averaged_param_norms_layer1_pe[f'{l}_val'] = np.mean(averaged_param_norms_layer1_pe[f'{l}_val'], axis=0)
 
-    averaged_global_hamming_xy = np.array(averaged_global_hamming_xy)
-    averaged_global_hamming_xy_std = np.std(averaged_global_hamming_xy, axis=0)
-    averaged_global_hamming_xy = np.mean(averaged_global_hamming_xy, axis=0)
+        averaged_param_norms_layer2_pe[f'{l}_val'] = np.array(averaged_param_norms_layer2_pe[f'{l}_val'])
+        averaged_param_norms_layer2_pe_std[f'{l}_val'] = np.std(averaged_param_norms_layer2_pe[f'{l}_val'], axis=0)
+        averaged_param_norms_layer2_pe[f'{l}_val'] = np.mean(averaged_param_norms_layer2_pe[f'{l}_val'], axis=0)
 
-    averaged_local_hamming_xy = np.array(averaged_local_hamming_xy)
-    averaged_local_hamming_xy_std = np.std(averaged_local_hamming_xy, axis=0)
-    averaged_local_hamming_xy = np.mean(averaged_local_hamming_xy, axis=0)
+        averaged_param_norms_layer3_pe[f'{l}_val'] = np.array(averaged_param_norms_layer3_pe[f'{l}_val'])
+        averaged_param_norms_layer3_pe_std[f'{l}_val'] = np.std(averaged_param_norms_layer3_pe[f'{l}_val'], axis=0)
+        averaged_param_norms_layer3_pe[f'{l}_val'] = np.mean(averaged_param_norms_layer3_pe[f'{l}_val'], axis=0)
 
-    # Global Hamming Distances plot
+        averaged_param_norms_layer4_pe[f'{l}_val'] = np.array(averaged_param_norms_layer4_pe[f'{l}_val'])
+        averaged_param_norms_layer4_pe_std[f'{l}_val'] = np.std(averaged_param_norms_layer4_pe[f'{l}_val'], axis=0)
+        averaged_param_norms_layer4_pe[f'{l}_val'] = np.mean(averaged_param_norms_layer4_pe[f'{l}_val'], axis=0)
+
+        averaged_param_norms_layer5_pe[f'{l}_val'] = np.array(averaged_param_norms_layer5_pe[f'{l}_val'])
+        averaged_param_norms_layer5_pe_std[f'{l}_val'] = np.std(averaged_param_norms_layer5_pe[f'{l}_val'], axis=0)
+        averaged_param_norms_layer5_pe[f'{l}_val'] = np.mean(averaged_param_norms_layer5_pe[f'{l}_val'], axis=0)
+
+    # Coordinates
+    averaged_param_norms_xy = np.array(averaged_param_norms_xy)
+    averaged_param_norms_xy_std = np.std(averaged_param_norms_xy, axis=0)
+    averaged_param_norms_xy = np.mean(averaged_param_norms_xy, axis=0)
+
+    averaged_param_norms_layer1_xy = np.array(averaged_param_norms_layer1_xy)
+    averaged_param_norms_layer1_xy_std = np.std(averaged_param_norms_layer1_xy, axis=0)
+    averaged_param_norms_layer1_xy = np.mean(averaged_param_norms_layer1_xy, axis=0)
+
+    averaged_param_norms_layer2_xy = np.array(averaged_param_norms_layer2_xy)
+    averaged_param_norms_layer2_xy_std = np.std(averaged_param_norms_layer2_xy, axis=0)
+    averaged_param_norms_layer2_xy = np.mean(averaged_param_norms_layer2_xy, axis=0)
+
+    averaged_param_norms_layer3_xy = np.array(averaged_param_norms_layer3_xy)
+    averaged_param_norms_layer3_xy_std = np.std(averaged_param_norms_layer3_xy, axis=0)
+    averaged_param_norms_layer3_xy = np.mean(averaged_param_norms_layer3_xy, axis=0)
+
+    averaged_param_norms_layer4_xy = np.array(averaged_param_norms_layer4_xy)
+    averaged_param_norms_layer4_xy_std = np.std(averaged_param_norms_layer4_xy, axis=0)
+    averaged_param_norms_layer4_xy = np.mean(averaged_param_norms_layer4_xy, axis=0)
+
+    averaged_param_norms_layer5_xy = np.array(averaged_param_norms_layer5_xy)
+    averaged_param_norms_layer5_xy_std = np.std(averaged_param_norms_layer5_xy, axis=0)
+    averaged_param_norms_layer5_xy = np.mean(averaged_param_norms_layer5_xy, axis=0)
+
+    # Neg Coordinates
+    averaged_param_norms_neg = np.array(averaged_param_norms_neg)
+    averaged_param_norms_neg_std = np.std(averaged_param_norms_neg, axis=0)
+    averaged_param_norms_neg = np.mean(averaged_param_norms_neg, axis=0)
+
+    averaged_param_norms_layer1_neg = np.array(averaged_param_norms_layer1_neg)
+    averaged_param_norms_layer1_neg_std = np.std(averaged_param_norms_layer1_neg, axis=0)
+    averaged_param_norms_layer1_neg = np.mean(averaged_param_norms_layer1_neg, axis=0)
+
+    averaged_param_norms_layer2_neg = np.array(averaged_param_norms_layer2_neg)
+    averaged_param_norms_layer2_neg_std = np.std(averaged_param_norms_layer2_neg, axis=0)
+    averaged_param_norms_layer2_neg = np.mean(averaged_param_norms_layer2_neg, axis=0)
+
+    averaged_param_norms_layer3_neg = np.array(averaged_param_norms_layer3_neg)
+    averaged_param_norms_layer3_neg_std = np.std(averaged_param_norms_layer3_neg, axis=0)
+    averaged_param_norms_layer3_neg = np.mean(averaged_param_norms_layer3_neg, axis=0)
+
+    averaged_param_norms_layer4_neg = np.array(averaged_param_norms_layer4_neg)
+    averaged_param_norms_layer4_neg_std = np.std(averaged_param_norms_layer4_neg, axis=0)
+    averaged_param_norms_layer4_neg = np.mean(averaged_param_norms_layer4_neg, axis=0)
+
+    averaged_param_norms_layer5_neg = np.array(averaged_param_norms_layer5_neg)
+    averaged_param_norms_layer5_neg_std = np.std(averaged_param_norms_layer5_neg, axis=0)
+    averaged_param_norms_layer5_neg = np.mean(averaged_param_norms_layer5_neg, axis=0)
+
+    # Encoding L=8 Layers
 
     fig1, ax1 = plt.subplots()
-    ax1.plot(x, averaged_global_hamming_pe[f'4_val'], label='L=4', linewidth=2)
-    ax1.fill_between(x, np.array(averaged_global_hamming_pe[f'4_val'])+np.array(averaged_global_hamming_pe_std[f'4_val']), np.array(averaged_global_hamming_pe[f'4_val'])-np.array(averaged_global_hamming_pe_std[f'4_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
-    ax1.plot(x, averaged_global_hamming_pe[f'8_val'], label='L=8', linewidth=2)
-    ax1.fill_between(x, np.array(averaged_global_hamming_pe[f'8_val'])+np.array(averaged_global_hamming_pe_std[f'8_val']), np.array(averaged_global_hamming_pe[f'8_val'])-np.array(averaged_global_hamming_pe_std[f'8_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+    ax1.plot(x, averaged_param_norms_layer1_pe[f'8_val'], label='Layer 1', linewidth=2)
+    ax1.fill_between(x, np.array(averaged_param_norms_layer1_pe[f'8_val'])+np.array(averaged_param_norms_layer1_pe_std[f'8_val']), np.array(averaged_param_norms_layer1_pe[f'8_val'])-np.array(averaged_param_norms_layer1_pe_std[f'8_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
-    ax1.plot(x, averaged_global_hamming_pe[f'16_val'], label='L=16', linewidth=2)
-    ax1.fill_between(x, np.array(averaged_global_hamming_pe[f'16_val'])+np.array(averaged_global_hamming_pe_std[f'16_val']), np.array(averaged_global_hamming_pe[f'16_val'])-np.array(averaged_global_hamming_pe_std[f'16_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+    ax1.plot(x, averaged_param_norms_layer2_pe[f'8_val'], label='Layer 2', linewidth=2)
+    ax1.fill_between(x, np.array(averaged_param_norms_layer2_pe[f'8_val'])+np.array(averaged_param_norms_layer2_pe_std[f'8_val']), np.array(averaged_param_norms_layer2_pe[f'8_val'])-np.array(averaged_param_norms_layer2_pe_std[f'8_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
-    ax1.plot(x, averaged_global_hamming_xy, label='coordinates', linewidth=2)
-    ax1.fill_between(x, np.array(averaged_global_hamming_xy)+np.array(averaged_global_hamming_xy_std), np.array(averaged_global_hamming_xy)-np.array(averaged_global_hamming_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+    ax1.plot(x, averaged_param_norms_layer3_pe[f'8_val'], label='Layer 3', linewidth=2)
+    ax1.fill_between(x, np.array(averaged_param_norms_layer3_pe[f'8_val'])+np.array(averaged_param_norms_layer3_pe_std[f'8_val']), np.array(averaged_param_norms_layer3_pe[f'8_val'])-np.array(averaged_param_norms_layer3_pe_std[f'8_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+
+    ax1.plot(x, averaged_param_norms_layer4_pe[f'8_val'], label='Layer 4', linewidth=2)
+    ax1.fill_between(x, np.array(averaged_param_norms_layer4_pe[f'8_val'])+np.array(averaged_param_norms_layer4_pe_std[f'8_val']), np.array(averaged_param_norms_layer4_pe[f'8_val'])-np.array(averaged_param_norms_layer4_pe_std[f'8_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+
+    ax1.plot(x, averaged_param_norms_layer5_pe[f'8_val'], label='Layer 5', linewidth=2)
+    ax1.fill_between(x, np.array(averaged_param_norms_layer5_pe[f'8_val'])+np.array(averaged_param_norms_layer5_pe_std[f'8_val']), np.array(averaged_param_norms_layer5_pe[f'8_val'])-np.array(averaged_param_norms_layer5_pe_std[f'8_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
     ax1.legend()
-    fig1.savefig('hamming_images/hamming_global')
+    fig1.savefig('param_norms_image/encoding_layer_norms')
 
-    # Local hamming distances plot
+    # Coordinates [0,1] Layers
 
     fig2, ax2 = plt.subplots()
-    ax2.plot(x, averaged_local_hamming_pe[f'4_val'], label='L=4', linewidth=2)
-    ax2.fill_between(x, np.array(averaged_local_hamming_pe[f'4_val'])+np.array(averaged_local_hamming_pe_std[f'4_val']), np.array(averaged_local_hamming_pe[f'4_val'])-np.array(averaged_local_hamming_pe_std[f'4_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
-    ax2.plot(x, averaged_local_hamming_pe[f'8_val'], label='L=8', linewidth=2)
-    ax2.fill_between(x, np.array(averaged_local_hamming_pe[f'8_val'])+np.array(averaged_local_hamming_pe_std[f'8_val']), np.array(averaged_local_hamming_pe[f'8_val'])-np.array(averaged_local_hamming_pe_std[f'8_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+    ax2.plot(x, averaged_param_norms_layer1_xy, label='Layer 1', linewidth=2)
+    ax2.fill_between(x, np.array(averaged_param_norms_layer1_xy)+np.array(averaged_param_norms_layer1_xy_std), np.array(averaged_param_norms_layer1_xy)-np.array(averaged_param_norms_layer1_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
-    ax2.plot(x, averaged_local_hamming_pe[f'16_val'], label='L=16', linewidth=2)
-    ax2.fill_between(x, np.array(averaged_local_hamming_pe[f'16_val'])+np.array(averaged_local_hamming_pe_std[f'16_val']), np.array(averaged_local_hamming_pe[f'16_val'])-np.array(averaged_local_hamming_pe_std[f'16_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+    ax2.plot(x, averaged_param_norms_layer2_xy, label='Layer 2', linewidth=2)
+    ax2.fill_between(x, np.array(averaged_param_norms_layer2_xy)+np.array(averaged_param_norms_layer2_xy_std), np.array(averaged_param_norms_layer2_xy)-np.array(averaged_param_norms_layer2_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
-    ax2.plot(x, averaged_local_hamming_xy, label='coordinates', linewidth=2)
-    ax2.fill_between(x, np.array(averaged_local_hamming_xy)+np.array(averaged_local_hamming_xy_std), np.array(averaged_local_hamming_xy)-np.array(averaged_local_hamming_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+    ax2.plot(x, averaged_param_norms_layer3_xy, label='Layer 3', linewidth=2)
+    ax2.fill_between(x, np.array(averaged_param_norms_layer3_xy)+np.array(averaged_param_norms_layer3_xy_std), np.array(averaged_param_norms_layer3_xy)-np.array(averaged_param_norms_layer3_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+
+    ax2.plot(x, averaged_param_norms_layer4_xy, label='Layer 4', linewidth=2)
+    ax2.fill_between(x, np.array(averaged_param_norms_layer4_xy)+np.array(averaged_param_norms_layer4_xy_std), np.array(averaged_param_norms_layer4_xy)-np.array(averaged_param_norms_layer4_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+
+    ax2.plot(x, averaged_param_norms_layer5_xy, label='Layer 5', linewidth=2)
+    ax2.fill_between(x, np.array(averaged_param_norms_layer5_xy)+np.array(averaged_param_norms_layer5_xy_std), np.array(averaged_param_norms_layer5_xy)-np.array(averaged_param_norms_layer5_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
     ax2.legend()
-    fig2.savefig('hamming_images/hamming_local')
+    fig2.savefig('param_norms_image/coordinate_layer_norms')
+
+    # Total Param Norms
+
+    fig3, ax3 = plt.subplots()
+
+    ax3.plot(x, averaged_param_norms_pe[f'4_val'], label='Encoding L=4', linewidth=2)
+    ax3.fill_between(x, np.array(averaged_param_norms_pe[f'4_val'])+np.array(averaged_param_norms_pe_std[f'4_val']), np.array(averaged_param_norms_pe[f'4_val'])-np.array(averaged_param_norms_pe_std[f'4_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+
+    ax3.plot(x, averaged_param_norms_pe[f'8_val'], label='Encoding L=8', linewidth=2)
+    ax3.fill_between(x, np.array(averaged_param_norms_pe[f'8_val'])+np.array(averaged_param_norms_pe_std[f'8_val']), np.array(averaged_param_norms_pe[f'8_val'])-np.array(averaged_param_norms_pe_std[f'8_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+
+    ax3.plot(x, averaged_param_norms_xy, label='Coordinates [0,1]', linewidth=2)
+    ax3.fill_between(x, np.array(averaged_param_norms_xy)+np.array(averaged_param_norms_xy_std), np.array(averaged_param_norms_xy)-np.array(averaged_param_norms_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+
+    ax3.plot(x, averaged_param_norms_neg, label='Coordinates [-1,1]', linewidth=2)
+    ax3.fill_between(x, np.array(averaged_param_norms_neg)+np.array(averaged_param_norms_neg_std), np.array(averaged_param_norms_neg)-np.array(averaged_param_norms_neg_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+
+    ax3.legend()
+    fig3.savefig('param_norms/overall_param_norms')
 
 if __name__ == '__main__':
     main()
