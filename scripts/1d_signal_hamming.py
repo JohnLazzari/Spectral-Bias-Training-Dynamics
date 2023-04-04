@@ -174,7 +174,7 @@ def train(model, optim, criterion, x, target, args):
 
         # hamming distance and min confusion during training
         # change comp_confusion to true if you want to get the minimum confusion bound
-        if epoch % 50 == 0:
+        if epoch % 25 == 0:
             hamming_in_region = hamming_within_regions(model, optim, x, target, 25)
             mean_hamming_within.append(np.mean(np.array(hamming_in_region)))
 
@@ -186,13 +186,16 @@ def train(model, optim, criterion, x, target, args):
 def main():
 
     parser = argparse.ArgumentParser(description='Blah.')
-    parser.add_argument('--epochs', type=int, default=1000, help='Number of epochs')
+    parser.add_argument('--epochs', type=int, default=500, help='Number of epochs')
 
     args = parser.parse_args()
     runs = [1, 2, 3, 4, 5]
 
     total_hamming_xy_local = []
     total_hamming_xy_global = []
+
+    total_hamming_neg_local = []
+    total_hamming_neg_global = []
 
     total_hamming_pe3_local = []
     total_hamming_pe3_global = []
@@ -205,6 +208,9 @@ def main():
         # Define model and other training parameters
         model_raw = Net(1, 128).to(device)
         optim_raw = optim.Adam(model_raw.parameters(), lr=.001)
+        
+        model_neg = Net(1, 128).to(device)
+        optim_neg = optim.Adam(model_neg.parameters(), lr=.001)
 
         model_pe3 = Net(8, 128).to(device)
         optim_pe3 = optim.Adam(model_pe3.parameters(), lr=.001)
@@ -215,6 +221,7 @@ def main():
         criterion = nn.MSELoss()
 
         yt, x = make_phased_waves(opt)
+        neg_x = np.arange(-1, 1, 1./(opt.N/2))
 
         # make data into tensors, and also add encoding for data, L=5 
         encoding_3 = np.stack((np.sin(np.pi*x), np.cos(np.pi*x), 
@@ -233,6 +240,9 @@ def main():
         x = torch.Tensor(x).to(device)
         x = x.unsqueeze(dim=1)
 
+        neg_x = torch.Tensor(neg_x).to(device)
+        neg_x = neg_x.unsqueeze(dim=1)
+
         encoding_3 = torch.Tensor(encoding_3).to(device)
         encoding_6 = torch.Tensor(encoding_6).to(device)
 
@@ -242,11 +252,15 @@ def main():
         # Start training loop, will need to evaluate the network at every other iteration to determine the spectrogram and
         # evaluate through training
         hamming_between_xy, hamming_within_xy = train(model_raw, optim_raw, criterion, x, target, args)
+        hamming_between_neg, hamming_within_neg = train(model_neg, optim_neg, criterion, neg_x, target, args)
         hamming_between_pe3, hamming_within_pe3 = train(model_pe3, optim_pe3, criterion, encoding_3, target, args)
         hamming_between_pe6, hamming_within_pe6 = train(model_pe6, optim_pe6, criterion, encoding_6, target, args)
 
         total_hamming_xy_local.append(hamming_within_xy)
         total_hamming_xy_global.append(hamming_between_xy)
+        
+        total_hamming_neg_local.append(hamming_within_neg)
+        total_hamming_neg_global.append(hamming_between_neg)
 
         total_hamming_pe3_local.append(hamming_within_pe3)
         total_hamming_pe3_global.append(hamming_between_pe3)
@@ -261,6 +275,14 @@ def main():
     total_hamming_xy_global = np.array(total_hamming_xy_global)
     total_hamming_xy_global_std = np.std(total_hamming_xy_global, axis=0)
     total_hamming_xy_global = np.mean(total_hamming_xy_global, axis=0)
+
+    total_hamming_neg_local = np.array(total_hamming_neg_local)
+    total_hamming_neg_local_std = np.std(total_hamming_neg_local, axis=0)
+    total_hamming_neg_local = np.mean(total_hamming_neg_local, axis=0)
+    
+    total_hamming_neg_global = np.array(total_hamming_neg_global)
+    total_hamming_neg_global_std = np.std(total_hamming_neg_global, axis=0)
+    total_hamming_neg_global = np.mean(total_hamming_neg_global, axis=0)
 
     total_hamming_pe3_local = np.array(total_hamming_pe3_local)
     total_hamming_pe3_local_std = np.std(total_hamming_pe3_local, axis=0)
@@ -282,13 +304,16 @@ def main():
 
     # Local Regions
 
-    plt.plot(x, np.array(total_hamming_xy_local), label='Coordinates', color=colors[3])
+    plt.plot(x, np.array(total_hamming_xy_local), label='Coordinates [0,1]', color=colors[3])
     plt.fill_between(x, np.array(total_hamming_xy_local)+np.array(total_hamming_xy_local_std), np.array(total_hamming_xy_local)-np.array(total_hamming_xy_local_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True, color=colors[3])
 
-    plt.plot(x, np.array(total_hamming_pe3_local), label='L=3', color=colors[0])
+    plt.plot(x, np.array(total_hamming_neg_local), label='Coordinates [-1,1]', color=colors[4])
+    plt.fill_between(x, np.array(total_hamming_neg_local)+np.array(total_hamming_neg_local_std), np.array(total_hamming_neg_local)-np.array(total_hamming_neg_local_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True, color=colors[4])
+
+    plt.plot(x, np.array(total_hamming_pe3_local), label='Encoding L=3', color=colors[0])
     plt.fill_between(x, np.array(total_hamming_pe3_local)+np.array(total_hamming_pe3_local_std), np.array(total_hamming_pe3_local)-np.array(total_hamming_pe3_local_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True,color=colors[0] )
 
-    plt.plot(x, np.array(total_hamming_pe6_local), label='L=6', color=colors[1])
+    plt.plot(x, np.array(total_hamming_pe6_local), label='Encoding L=6', color=colors[1])
     plt.fill_between(x, np.array(total_hamming_pe6_local)+np.array(total_hamming_pe6_local_std), np.array(total_hamming_pe6_local)-np.array(total_hamming_pe6_local_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True,color=colors[1] )
 
     plt.legend()
@@ -296,13 +321,16 @@ def main():
 
     # Global hamming distance
 
-    plt.plot(x, np.array(total_hamming_xy_global), label='Coordinates', color=colors[3])
+    plt.plot(x, np.array(total_hamming_xy_global), label='Coordinates [0,1]', color=colors[3])
     plt.fill_between(x, np.array(total_hamming_xy_global)+np.array(total_hamming_xy_global_std), np.array(total_hamming_xy_global)-np.array(total_hamming_xy_global_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True, color=colors[3])
 
-    plt.plot(x, np.array(total_hamming_pe3_global), label='L=3', color=colors[0])
+    plt.plot(x, np.array(total_hamming_neg_global), label='Coordinates [-1,1]', color=colors[4])
+    plt.fill_between(x, np.array(total_hamming_neg_global)+np.array(total_hamming_neg_global_std), np.array(total_hamming_neg_global)-np.array(total_hamming_neg_global_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True, color=colors[4])
+
+    plt.plot(x, np.array(total_hamming_pe3_global), label='Encoding L=3', color=colors[0])
     plt.fill_between(x, np.array(total_hamming_pe3_global)+np.array(total_hamming_pe3_global_std), np.array(total_hamming_pe3_global)-np.array(total_hamming_pe3_global_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True, color=colors[0])
 
-    plt.plot(x, np.array(total_hamming_pe6_global), label='L=6', color=colors[1])
+    plt.plot(x, np.array(total_hamming_pe6_global), label='Encoding L=6', color=colors[1])
     plt.fill_between(x, np.array(total_hamming_pe6_global)+np.array(total_hamming_pe6_global_std), np.array(total_hamming_pe6_global)-np.array(total_hamming_pe6_global_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True, color=colors[1])
 
     plt.legend()

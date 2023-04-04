@@ -134,7 +134,9 @@ def hamming_between_regions(model, optim, inp_batch, inp_target, iterations):
     return confusion_between
 
 def make_phased_waves(opt):
+
     t = np.arange(0, 1, 1./opt.N)
+
     if opt.A is None:
         yt = reduce(lambda a, b: a + b, 
                     [np.sin(2 * np.pi * ki * t + 2 * np.pi * phi) for ki, phi in zip(opt.K, opt.PHI)])
@@ -175,7 +177,7 @@ def train(model, optim, criterion, x, target, args):
 def main():
 
     parser = argparse.ArgumentParser(description='Blah.')
-    parser.add_argument('--epochs', type=int, default=1000, help='Number of epochs')
+    parser.add_argument('--epochs', type=int, default=500, help='Number of epochs')
     parser.add_argument('--neurons', type=int, default=128, help='Number of neurons per layer')
 
     args = parser.parse_args()
@@ -184,6 +186,9 @@ def main():
 
     total_confusion_xy_local = []
     total_confusion_xy_global = []
+
+    total_confusion_neg_local = []
+    total_confusion_neg_global = []
 
     total_confusion_pe4_local = []
     total_confusion_pe4_global = []
@@ -197,6 +202,10 @@ def main():
         model_raw = Net(1, args.neurons).to(device)
         optim_raw = optim.Adam(model_raw.parameters(), lr=.001)
 
+        # Define model and other training parameters
+        model_neg = Net(1, args.neurons).to(device)
+        optim_neg = optim.Adam(model_neg.parameters(), lr=.001)
+
         model_pe_4 = Net(8, args.neurons).to(device)
         optim_pe_4 = optim.Adam(model_pe_4.parameters(), lr=.001)
 
@@ -206,7 +215,7 @@ def main():
         criterion = nn.MSELoss()
 
         yt, x = make_phased_waves(opt)
-
+        neg_x = np.arange(-1, 1, 1./(opt.N/2))
         # make data into tensors, and also add encoding for data, L=5 
 
         encoding_4 = np.stack((np.sin(np.pi*x), np.cos(np.pi*x), 
@@ -225,6 +234,9 @@ def main():
         x = torch.Tensor(x).to(device)
         x = x.unsqueeze(dim=1)
 
+        neg_x = torch.Tensor(neg_x).to(device)
+        neg_x = neg_x.unsqueeze(dim=1)
+
         encoding_l4 = torch.Tensor(encoding_4).to(device)
         encoding_l8 = torch.Tensor(encoding_8).to(device)
 
@@ -234,11 +246,15 @@ def main():
         # Start training loop, will need to evaluate the network at every other iteration to determine the spectrogram and
         # evaluate through training
         confusion_within_xy, confusion_between_xy = train(model_raw, optim_raw, criterion, x, target, args)
+        confusion_within_neg, confusion_between_neg = train(model_neg, optim_neg, criterion, neg_x, target, args)
         confusion_within_pe4, confusion_between_pe4 = train(model_pe_4, optim_pe_4, criterion, encoding_l4, target, args)
         confusion_within_pe8, confusion_between_pe8 = train(model_pe_8, optim_pe_8, criterion, encoding_l8, target, args)
 
         total_confusion_xy_local.append(confusion_within_xy)
         total_confusion_xy_global.append(confusion_between_xy)
+
+        total_confusion_neg_local.append(confusion_within_neg)
+        total_confusion_neg_global.append(confusion_between_neg)
 
         total_confusion_pe4_local.append(confusion_within_pe4)
         total_confusion_pe4_global.append(confusion_between_pe4)
@@ -249,21 +265,26 @@ def main():
     total_confusion_xy_local = np.array(total_confusion_xy_local).flatten()
     total_confusion_xy_global = np.array(total_confusion_xy_global).flatten()
 
+    total_confusion_neg_local = np.array(total_confusion_neg_local).flatten()
+    total_confusion_neg_global = np.array(total_confusion_neg_global).flatten()
+
     total_confusion_pe4_local = np.array(total_confusion_pe4_local).flatten()
     total_confusion_pe4_global = np.array(total_confusion_pe4_global).flatten()
 
     total_confusion_pe8_local = np.array(total_confusion_pe8_local).flatten()
     total_confusion_pe8_global = np.array(total_confusion_pe8_global).flatten()
 
-    sns.kdeplot(total_confusion_xy_local, fill=True, label='Coordinates', color=colors[3])
-    sns.kdeplot(total_confusion_pe4_local, fill=True, label='L=3', color=colors[0])
-    sns.kdeplot(total_confusion_pe8_local, fill=True, label='L=6', color=colors[1])
+    sns.kdeplot(total_confusion_xy_local, fill=True, label='Coordinates [0,1]', color=colors[3])
+    sns.kdeplot(total_confusion_neg_local, fill=True, label='Coordinates [-1,1]', color=colors[4])
+    sns.kdeplot(total_confusion_pe4_local, fill=True, label='Encoding L=3', color=colors[0])
+    sns.kdeplot(total_confusion_pe8_local, fill=True, label='Encoding L=6', color=colors[1])
     plt.legend()
     plt.show()
 
-    sns.kdeplot(total_confusion_xy_global, fill=True, label='Coordinates', color=colors[3])
-    sns.kdeplot(total_confusion_pe4_global, fill=True, label='L=3', color=colors[0])
-    sns.kdeplot(total_confusion_pe8_global, fill=True, label='L=6', color=colors[1])
+    sns.kdeplot(total_confusion_xy_global, fill=True, label='Coordinates [0,1]', color=colors[3])
+    sns.kdeplot(total_confusion_neg_global, fill=True, label='Coordinates [-1,1]', color=colors[4])
+    sns.kdeplot(total_confusion_pe4_global, fill=True, label='Encoding L=3', color=colors[0])
+    sns.kdeplot(total_confusion_pe8_global, fill=True, label='Encoding L=6', color=colors[1])
     plt.legend()
     plt.show()
 

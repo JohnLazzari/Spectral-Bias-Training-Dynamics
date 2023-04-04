@@ -69,7 +69,6 @@ def hamming_within_regions(model, optim, inp_batch, inp_target, iterations):
 
     print('Starting hamming within local regions...')
     hamming_local = []
-    confusion_local = []
     # reshape the inputs to be in image format again
     shape = inp_batch.shape
     inp_batch = torch.reshape(inp_batch, [512, 512, shape[-1]])

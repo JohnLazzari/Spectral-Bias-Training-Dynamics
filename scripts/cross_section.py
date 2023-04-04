@@ -8,7 +8,6 @@ from PIL import Image
 import cv2
 import numpy as np
 from nerf2D import Positional_Encoding
-from torch_network import Net
 import random
 import torchmetrics
 import seaborn as sns
@@ -21,14 +20,77 @@ from matplotlib import cm
 sns.set_style('darkgrid')
 colors = sns.color_palette()
 
-def get_activation_regions(model, input, L, slice, first_layer):
+class Net(nn.Module):
+    def __init__(self, input_dim, hidden):
+        super(Net, self).__init__()
+        self.hidden = hidden
+        self.l1 = nn.Linear(input_dim, hidden)
+        self.l2 = nn.Linear(hidden, hidden)
+        self.l3 = nn.Linear(hidden, hidden)
+        self.l4 = nn.Linear(hidden, hidden)
+        self.l5 = nn.Linear(hidden, 3)
+        self.relu = nn.ReLU()
 
-    cross_section = torch.zeros(16384, 1, L*4-2).to('cuda:0')
+    def forward(self, x, act=False, first_layer=True):
+
+        out_1 = self.relu(self.l1(x))
+
+        if act:
+            act_1 = out_1
+            if first_layer:
+                return act_1.squeeze()
+
+        out_2 = self.relu(self.l2(out_1))
+
+        if act:
+            act_2 = out_2
+
+        out_3 = self.relu(self.l3(out_2))
+
+        if act:
+            act_3 = out_3
+
+        out_4 = self.relu(self.l4(out_3))
+
+        if act:
+            act_4 = out_4
+
+        out_5 = self.l5(out_4)
+
+        if act:
+            pattern = torch.cat((act_1, act_2, act_3, act_4), dim=1).squeeze()
+            return pattern
+
+        return out_5
+
+def set_positive_values_to_one(tensor):
+    tensor = torch.where(tensor > 0.0, torch.ones_like(tensor), tensor)
+    return tensor
+
+def get_activation_regions(model, input, L, slice, first_layer=False):
+
+    cross_section = torch.zeros(512*512, L*4-2).to('cuda:0')
+    input = input.squeeze()
     if slice == 'high':
         input = torch.cat((cross_section, input), dim=-1)
     elif slice == 'low':
         input = torch.cat((input, cross_section), dim=-1)
 
+    with torch.no_grad():
+        # Pass all pixels to the model at once
+        batch_size = input.shape[0]
+        activations = model(input.view(batch_size, -1), act=True, first_layer=first_layer)
+        
+        # Set positive values to one
+        activations = set_positive_values_to_one(activations)
+        
+        # Count the number of unique patterns
+        unique_patterns = torch.unique(activations, dim=0)
+        num_unique_patterns = unique_patterns.shape[0]
+        
+        return num_unique_patterns, unique_patterns.cpu().numpy().tolist(), activations.cpu().numpy().tolist()
+
+    '''
     with torch.no_grad():
         patterns = []
         # get patterns
@@ -43,11 +105,12 @@ def get_activation_regions(model, input, L, slice, first_layer):
                 unique_patterns.append(pattern)
 
     return len(unique_patterns), unique_patterns, patterns
+    '''
 
 def plot_patterns(patterns, all_patterns):
 
     dict_patterns = {}
-    colors = np.zeros(16384)
+    colors = np.zeros(512*512)
     random.shuffle(patterns)
     for i, pattern in enumerate(patterns):
         # assign each position a color
@@ -55,7 +118,7 @@ def plot_patterns(patterns, all_patterns):
     for i, pattern in enumerate(all_patterns):
         colors[i] = dict_patterns[tuple(pattern)]
     
-    colors = np.reshape(colors, [128, 128])
+    colors = np.reshape(colors, [512, 512])
     plt.pcolormesh(colors, cmap='Spectral')
     plt.tick_params(left = False, right = False , labelleft = False ,
             labelbottom = False, bottom = False)
@@ -108,8 +171,7 @@ def train(model, optim, criterion, im, encoding, args):
     # Get the training data
     train_inp_batch, train_inp_target = get_data(image=im, encoding=encoding, L=args.L, batch_size=args.batch_size)
     # data for visualization, should be raw_xy since it is 2D slice
-    im2arr = np.random.randint(0, 255, (128, 128, 3))
-    inp_batch, inp_target = get_data(image=im2arr, encoding='raw_xy', L=0, batch_size=1, shuffle=False, negative=True)
+    inp_batch, inp_target = get_data(image=im, encoding='raw_xy', L=0, batch_size=1, shuffle=False, negative=True)
 
     losses = []
     num_patterns = []
@@ -117,7 +179,6 @@ def train(model, optim, criterion, im, encoding, args):
     # Start the training loop
     for epoch in range(args.epochs):
 
-        dead_neuron_count = 0
         running_loss = 0
 
         # Train the model for one epoch
@@ -148,17 +209,18 @@ def train(model, optim, criterion, im, encoding, args):
 def main():
 
     parser = argparse.ArgumentParser(description='Blah.')
-    parser.add_argument('--neurons', type=int, default=128, help='Number of neurons per layer')
-    parser.add_argument('--epochs', type=int, default=5000, help='Number of epochs')
-    parser.add_argument('--batch_size', type=int, default=256, help='make a training and testing set')
+    parser.add_argument('--neurons', type=int, default=512, help='Number of neurons per layer')
+    parser.add_argument('--epochs', type=int, default=2500, help='Number of epochs')
+    parser.add_argument('--batch_size', type=int, default=8192, help='make a training and testing set')
     parser.add_argument('--print_loss', type=bool, default=True, help='print training loss')
-    parser.add_argument('--L', type=int, default=5, help='Encoding frequency')
+    parser.add_argument('--L', type=int, default=4, help='Encoding frequency')
     parser.add_argument('--frequency_slice', type=str, default='low', help='2D slice based on where high and low frequency components are')
     parser.add_argument('--first_layer', type=bool, default=False, help='activation patterns in first layer only')
     args = parser.parse_args()
 
-    # compute gradients individually for each, not sure best way to do this yet
-    im2arr = np.random.randint(0, 255, (64, 64, 3))
+    # change image to any in image_demonstration
+    test_data = np.load('test_data_div2k.npy')
+    test_data = test_data[0]
 
     criterion = nn.MSELoss()
 
@@ -169,7 +231,7 @@ def main():
 
     #################################### Sin Cos #############################################
     print("\nBeginning Positional Encoding Training...")
-    num_patterns = train(model_pe, optim_pe, criterion, im2arr, 'sin_cos', args)
+    num_patterns = train(model_pe, optim_pe, criterion, test_data, 'sin_cos', args)
 
 if __name__ == '__main__':
     main()

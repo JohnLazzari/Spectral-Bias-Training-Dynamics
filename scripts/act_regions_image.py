@@ -56,34 +56,31 @@ class Net(nn.Module):
         out_5 = self.l5(out_4)
 
         if act:
-            pattern = torch.cat((act_1, act_2, act_3, act_4), dim=0).squeeze()
+            pattern = torch.cat((act_1, act_2, act_3, act_4), dim=1).squeeze()
             return pattern
 
         return out_5
 
+
 def set_positive_values_to_one(tensor):
-    # Create a mask that is 1 for positive values and 0 for non-positive values
-    mask = tensor.gt(0.0)
-    # Set all positive values to 1 using the mask
-    tensor[mask] = 1
+    tensor = torch.where(tensor > 0.0, torch.ones_like(tensor), tensor)
     return tensor
 
 def get_activation_regions(model, input):
     with torch.no_grad():
-        patterns = []
-        # get patterns
-        for i, pixel in enumerate(input):
-            pixel = pixel.squeeze()
-            act_pattern = model(pixel, act=True)
-            act_pattern = set_positive_values_to_one(act_pattern)
-            patterns.append(list(act_pattern.detach().cpu().numpy()))
-        # get the amount of unique patterns
-        unique_patterns = []
-        for pattern in patterns:
-            if pattern not in unique_patterns:
-                unique_patterns.append(pattern)
-    return len(unique_patterns), unique_patterns, patterns
-
+        # Pass all pixels to the model at once
+        batch_size = input.shape[0]
+        activations = model(input.view(batch_size, -1), act=True)
+        
+        # Set positive values to one
+        activations = set_positive_values_to_one(activations)
+        
+        # Count the number of unique patterns
+        unique_patterns = torch.unique(activations, dim=0)
+        num_unique_patterns = unique_patterns.shape[0]
+        
+        return num_unique_patterns, unique_patterns.cpu().numpy().tolist(), activations.cpu().numpy().tolist()
+    
 def plot_patterns(patterns, all_patterns):
 
     dict_patterns = {}
@@ -98,6 +95,8 @@ def plot_patterns(patterns, all_patterns):
     
     colors = np.reshape(colors, [512, 512])
     plt.pcolormesh(colors, cmap='Spectral')
+    plt.tick_params(left = False, right = False , top = False, labelleft = False ,
+                labelbottom = False, labeltop=False, bottom = False)
     plt.colorbar()
     plt.show()
 
@@ -237,20 +236,7 @@ def main():
     test_data = np.load('test_data_div2k.npy')
     test_data = test_data[:5]
 
-    L_vals = [4, 8, 16]
-    # lists for all confusion for each image
-    averaged_local_hamming_xy = []
-    averaged_global_hamming_xy = []
-
-    averaged_local_hamming_pe = {}
-    averaged_global_hamming_pe = {}
-
-    averaged_local_hamming_pe_std = {}
-    averaged_global_hamming_pe_std = {}
-
-    for l in L_vals:
-        averaged_local_hamming_pe[f'{l}_val'] = []
-        averaged_global_hamming_pe[f'{l}_val'] = []
+    L_vals = [1, 2]
 
     # Go through each image individually
     for im in test_data:
@@ -265,79 +251,21 @@ def main():
         if args.train_coordinates:
             print("\nBeginning Raw XY Training...")
             xy_num_patterns, xy_losses = train(model_raw, optim_raw, criterion, im, 'raw_xy', 0, args)
-        
+
         #################################### Sin Cos #############################################
 
         if args.train_encoding:
-            print("\nBeginning Positional Encoding Training...")
-            for l in L_vals:
 
+            for l in L_vals:
+                print("\nBeginning Positional Encoding Training...")
                 # Set up pe network
                 model_pe = Net(l*4, args.neurons).to('cuda:0')
                 optim_pe = torch.optim.Adam(model_pe.parameters(), lr=.001)
                 criterion = nn.MSELoss()
 
-                pe_num_patterns,pe_losses = train(model_pe, optim_pe, criterion, im, 'sin_cos', l, args)
+                pe_num_patterns, pe_losses = train(model_pe, optim_pe, criterion, im, 'sin_cos', l, args)
 
-                averaged_global_hamming_pe[f'{l}_val'].append(mean_hamming_between_pe)
-                averaged_local_hamming_pe[f'{l}_val'].append(mean_hamming_within_pe)
-    
     x = np.linspace(0, 1000, 40)
-
-    # Get mean and std across images
-    for l in L_vals:
-
-        averaged_global_hamming_pe[f'{l}_val'] = np.array(averaged_global_hamming_pe[f'{l}_val'])
-        averaged_global_hamming_pe_std[f'{l}_val'] = np.std(averaged_global_hamming_pe[f'{l}_val'], axis=0)
-        averaged_global_hamming_pe[f'{l}_val'] = np.mean(averaged_global_hamming_pe[f'{l}_val'], axis=0)
-
-        averaged_local_hamming_pe[f'{l}_val'] = np.array(averaged_local_hamming_pe[f'{l}_val'])
-        averaged_local_hamming_pe_std[f'{l}_val'] = np.std(averaged_local_hamming_pe[f'{l}_val'], axis=0)
-        averaged_local_hamming_pe[f'{l}_val'] = np.mean(averaged_local_hamming_pe[f'{l}_val'], axis=0)
-
-    averaged_global_hamming_xy = np.array(averaged_global_hamming_xy)
-    averaged_global_hamming_xy_std = np.std(averaged_global_hamming_xy, axis=0)
-    averaged_global_hamming_xy = np.mean(averaged_global_hamming_xy, axis=0)
-
-    averaged_local_hamming_xy = np.array(averaged_local_hamming_xy)
-    averaged_local_hamming_xy_std = np.std(averaged_local_hamming_xy, axis=0)
-    averaged_local_hamming_xy = np.mean(averaged_local_hamming_xy, axis=0)
-
-    # Global Hamming Distances plot
-
-    fig1, ax1 = plt.subplots()
-    ax1.plot(x, averaged_global_hamming_pe[f'4_val'], label='L=4', linewidth=2)
-    ax1.fill_between(x, np.array(averaged_global_hamming_pe[f'4_val'])+np.array(averaged_global_hamming_pe_std[f'4_val']), np.array(averaged_global_hamming_pe[f'4_val'])-np.array(averaged_global_hamming_pe_std[f'4_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
-
-    ax1.plot(x, averaged_global_hamming_pe[f'8_val'], label='L=8', linewidth=2)
-    ax1.fill_between(x, np.array(averaged_global_hamming_pe[f'8_val'])+np.array(averaged_global_hamming_pe_std[f'8_val']), np.array(averaged_global_hamming_pe[f'8_val'])-np.array(averaged_global_hamming_pe_std[f'8_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
-
-    ax1.plot(x, averaged_global_hamming_pe[f'16_val'], label='L=16', linewidth=2)
-    ax1.fill_between(x, np.array(averaged_global_hamming_pe[f'16_val'])+np.array(averaged_global_hamming_pe_std[f'16_val']), np.array(averaged_global_hamming_pe[f'16_val'])-np.array(averaged_global_hamming_pe_std[f'16_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
-
-    ax1.plot(x, averaged_global_hamming_xy, label='coordinates', linewidth=2)
-    ax1.fill_between(x, np.array(averaged_global_hamming_xy)+np.array(averaged_global_hamming_xy_std), np.array(averaged_global_hamming_xy)-np.array(averaged_global_hamming_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
-
-    ax1.legend()
-    fig1.savefig('hamming_images/hamming_global')
-
-    # Local hamming distances plot
-
-    fig2, ax2 = plt.subplots()
-    ax2.plot(x, averaged_local_hamming_pe[f'4_val'], label='L=4', linewidth=2)
-    ax2.fill_between(x, np.array(averaged_local_hamming_pe[f'4_val'])+np.array(averaged_local_hamming_pe_std[f'4_val']), np.array(averaged_local_hamming_pe[f'4_val'])-np.array(averaged_local_hamming_pe_std[f'4_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
-
-    ax2.plot(x, averaged_local_hamming_pe[f'8_val'], label='L=8', linewidth=2)
-    ax2.fill_between(x, np.array(averaged_local_hamming_pe[f'8_val'])+np.array(averaged_local_hamming_pe_std[f'8_val']), np.array(averaged_local_hamming_pe[f'8_val'])-np.array(averaged_local_hamming_pe_std[f'8_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
-
-    ax2.plot(x, averaged_local_hamming_pe[f'16_val'], label='L=16', linewidth=2)
-    ax2.fill_between(x, np.array(averaged_local_hamming_pe[f'16_val'])+np.array(averaged_local_hamming_pe_std[f'16_val']), np.array(averaged_local_hamming_pe[f'16_val'])-np.array(averaged_local_hamming_pe_std[f'16_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
-
-    ax2.plot(x, averaged_local_hamming_xy, label='coordinates', linewidth=2)
-    ax2.fill_between(x, np.array(averaged_local_hamming_xy)+np.array(averaged_local_hamming_xy_std), np.array(averaged_local_hamming_xy)-np.array(averaged_local_hamming_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
-
-    ax2.legend()
-    fig2.savefig('hamming_images/hamming_local')
 
 if __name__ == '__main__':
     main()
