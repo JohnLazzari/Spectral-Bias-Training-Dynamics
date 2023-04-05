@@ -231,7 +231,7 @@ def main():
 
     # change image to any in image_demonstration
     test_data = np.load('test_data_div2k.npy')
-    test_data = test_data[:3]
+    test_data = test_data[:5]
 
     criterion = nn.MSELoss()
 
@@ -320,8 +320,8 @@ def main():
     ax1.fill_between(x, np.array(averaged_patterns_neg_xy)+np.array(averaged_patterns_neg_xy_std), np.array(averaged_patterns_neg_xy)-np.array(averaged_patterns_neg_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
     ax1.legend()
-    plt.xlabel("Epochs")
-    plt.ylabel("Num Activation Regions")
+    ax1.set_xlabel("Epochs")
+    ax1.set_ylabel("Num Activation Regions")
     fig1.savefig('act_region_growth/act_pattern_growth')
 
 if __name__ == '__main__':
