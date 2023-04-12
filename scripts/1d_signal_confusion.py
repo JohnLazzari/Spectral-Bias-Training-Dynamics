@@ -20,8 +20,8 @@ from argparse import Namespace
 from scipy import signal
 from scipy.fft import fftshift
 
-sns.set_style('darkgrid')
-colors = sns.color_palette()
+sns.set_style('whitegrid')
+colors = sns.color_palette('tab10')
 
 # Data Generation
 opt = Namespace()
@@ -100,7 +100,7 @@ def hamming_within_regions(model, optim, inp_batch, inp_target, iterations):
         patch_target = inp_target[rand_x-25:rand_x+25]
 
         # get confusion and hamming for every coordinate in the 3x3 region
-        for j in range(250):
+        for j in range(100):
             rand_1 = np.random.randint(0, 49)
             rand_2 = np.random.randint(0, 49)
 
@@ -169,8 +169,9 @@ def train(model, optim, criterion, x, target, args):
         optim.step()
 
         if epoch > args.epochs-2:
-            confusion_in_region = hamming_within_regions(model, optim, x, target, 50)
-            confusion_between_region = hamming_between_regions(model, optim, x, target, 10000)
+            # 25, 5000
+            confusion_in_region = hamming_within_regions(model, optim, x, target, 25)
+            confusion_between_region = hamming_between_regions(model, optim, x, target, 5000)
 
     return confusion_in_region, confusion_between_region
 
@@ -274,18 +275,20 @@ def main():
     total_confusion_pe8_local = np.array(total_confusion_pe8_local).flatten()
     total_confusion_pe8_global = np.array(total_confusion_pe8_global).flatten()
 
-    sns.kdeplot(total_confusion_xy_local, fill=True, label='Coordinates [0,1]', color=colors[3])
-    sns.kdeplot(total_confusion_neg_local, fill=True, label='Coordinates [-1,1]', color=colors[4])
-    sns.kdeplot(total_confusion_pe4_local, fill=True, label='Encoding L=3', color=colors[0])
-    sns.kdeplot(total_confusion_pe8_local, fill=True, label='Encoding L=6', color=colors[1])
+    sns.kdeplot(total_confusion_xy_local, fill=True, label='Coordinates [0,1]', color=colors[3], linewidth=2)
+    sns.kdeplot(total_confusion_neg_local, fill=True, label='Coordinates [-1,1]', color=colors[4], linewidth=2)
+    sns.kdeplot(total_confusion_pe4_local, fill=True, label='Encoding L=3', color=colors[0], linewidth=2)
+    sns.kdeplot(total_confusion_pe8_local, fill=True, label='Encoding L=6', color=colors[1], linewidth=2)
     plt.legend()
+    sns.despine()
     plt.show()
 
-    sns.kdeplot(total_confusion_xy_global, fill=True, label='Coordinates [0,1]', color=colors[3])
-    sns.kdeplot(total_confusion_neg_global, fill=True, label='Coordinates [-1,1]', color=colors[4])
-    sns.kdeplot(total_confusion_pe4_global, fill=True, label='Encoding L=3', color=colors[0])
-    sns.kdeplot(total_confusion_pe8_global, fill=True, label='Encoding L=6', color=colors[1])
+    sns.kdeplot(total_confusion_xy_global, fill=True, label='Coordinates [0,1]', color=colors[3], linewidth=2)
+    sns.kdeplot(total_confusion_neg_global, fill=True, label='Coordinates [-1,1]', color=colors[4], linewidth=2)
+    sns.kdeplot(total_confusion_pe4_global, fill=True, label='Encoding L=3', color=colors[0], linewidth=2)
+    sns.kdeplot(total_confusion_pe8_global, fill=True, label='Encoding L=6', color=colors[1], linewidth=2)
     plt.legend()
+    sns.despine()
     plt.show()
 
 if __name__ == '__main__':
