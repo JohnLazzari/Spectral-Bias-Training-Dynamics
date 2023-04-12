@@ -17,8 +17,8 @@ import itertools
 import argparse
 from matplotlib import cm
 
-sns.set_style('darkgrid')
-colors = sns.color_palette()
+sns.set_style('whitegrid')
+colors = sns.color_palette('tab10')
 
 class Net(nn.Module):
     def __init__(self, input_dim, hidden):
@@ -172,7 +172,7 @@ def get_data(image, encoding, L=10, batch_size=2048, negative=False, shuffle=Tru
     inp_batch, inp_target, ind_vals = PE.get_dataset(L, negative=negative)
 
     inp_batch, inp_target = torch.Tensor(inp_batch), torch.Tensor(inp_target)
-    inp_batch, inp_target = inp_batch.to('cuda:1'), inp_target.to('cuda:1')
+    inp_batch, inp_target = inp_batch.to('cuda:0'), inp_target.to('cuda:0')
 
     # create batches to track batch loss and show it is more stable due to gabor encoding
     full_batches = []
@@ -279,7 +279,7 @@ def main():
         #################################### Raw XY ##############################################
 
         # Set up raw_xy network
-        model_raw = Net(2, args.neurons).to('cuda:1')
+        model_raw = Net(2, args.neurons).to('cuda:0')
         optim_raw = torch.optim.Adam(model_raw.parameters(), lr=.001)
         criterion = nn.MSELoss()
 
@@ -291,7 +291,7 @@ def main():
 
         ################################## larger normalizing interval ###########################
 
-        model_neg = Net(2, args.neurons).to('cuda:1')
+        model_neg = Net(2, args.neurons).to('cuda:0')
         optim_neg = torch.optim.Adam(model_neg.parameters(), lr=.001)
 
         print("\nBeginning Neg Raw XY Training...")
@@ -306,7 +306,7 @@ def main():
         for l in L_vals:
 
             # Set up pe network
-            model_pe = Net(l*4, args.neurons).to('cuda:1')
+            model_pe = Net(l*4, args.neurons).to('cuda:0')
             optim_pe = torch.optim.Adam(model_pe.parameters(), lr=.001)
             criterion = nn.MSELoss()
 
@@ -329,22 +329,24 @@ def main():
     averaged_local_confusion_neg_xy = np.array(averaged_local_confusion_neg_xy).flatten()
 
     fig1, ax1 = plt.subplots()
-    sns.kdeplot(data=averaged_global_confusion_pe[f'4_val'], fill=True, label='Encoding L=4')
-    sns.kdeplot(data=averaged_global_confusion_pe[f'8_val'], fill=True, label='Encoding L=8')
-    sns.kdeplot(data=averaged_global_confusion_pe[f'16_val'], fill=True, label='Encoding L=16')
-    sns.kdeplot(data=averaged_global_confusion_xy, fill=True, label='Coordinates [0,1]')
-    sns.kdeplot(data=averaged_global_confusion_neg_xy, fill=True, label='Coordinates [-1,1]')
-    fig1.legend()
-    fig1.savefig('confusion_images/confusion_global_run2_epoch1000')
+    sns.kdeplot(data=averaged_global_confusion_pe[f'4_val'], fill=True, label='Encoding L=4', linewidth=2)
+    sns.kdeplot(data=averaged_global_confusion_pe[f'8_val'], fill=True, label='Encoding L=8', linewidth=2)
+    sns.kdeplot(data=averaged_global_confusion_pe[f'16_val'], fill=True, label='Encoding L=16', linewidth=2)
+    sns.kdeplot(data=averaged_global_confusion_xy, fill=True, label='Coordinates [0,1]', linewidth=2)
+    sns.kdeplot(data=averaged_global_confusion_neg_xy, fill=True, label='Coordinates [-1,1]', linewidth=2)
+    ax1.legend(loc='best')
+    sns.despine()
+    fig1.savefig('confusion_images/confusion_global_run3_epoch100')
 
     fig2, ax2 = plt.subplots()
-    sns.kdeplot(data=averaged_local_confusion_pe[f'4_val'], fill=True, label='Encoding L=4')
-    sns.kdeplot(data=averaged_local_confusion_pe[f'8_val'], fill=True, label='Encoding L=8')
-    sns.kdeplot(data=averaged_local_confusion_pe[f'16_val'], fill=True, label='Encoding L=16')
-    sns.kdeplot(data=averaged_local_confusion_xy, fill=True, label='Coordinates [0,1]')
-    sns.kdeplot(data=averaged_local_confusion_neg_xy, fill=True, label='Coordinates [-1,1]')
-    fig2.legend()
-    fig2.savefig('confusion_images/confusion_local_run2_epoch1000')
+    sns.kdeplot(data=averaged_local_confusion_pe[f'4_val'], fill=True, label='Encoding L=4', linewidth=2)
+    sns.kdeplot(data=averaged_local_confusion_pe[f'8_val'], fill=True, label='Encoding L=8', linewidth=2)
+    sns.kdeplot(data=averaged_local_confusion_pe[f'16_val'], fill=True, label='Encoding L=16', linewidth=2)
+    sns.kdeplot(data=averaged_local_confusion_xy, fill=True, label='Coordinates [0,1]', linewidth=2)
+    sns.kdeplot(data=averaged_local_confusion_neg_xy, fill=True, label='Coordinates [-1,1]', linewidth=2)
+    ax2.legend(loc='best')
+    sns.despine()
+    fig2.savefig('confusion_images/confusion_local_run3_epoch100')
 
 if __name__ == '__main__':
     main()
