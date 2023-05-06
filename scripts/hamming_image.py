@@ -210,7 +210,7 @@ def train(model, optim, criterion, im, encoding, L, args, negative=False):
         losses.append(epoch_loss)
 
         # mean hamming distance during training
-        if epoch % 50 == 0:
+        if epoch % 10 == 0:
             # 100, 50000
             hamming_in_region = hamming_within_regions(model, optim, inp_batch, inp_target, 100)
             mean_hamming_within.append(np.mean(np.array(hamming_in_region)))
@@ -298,7 +298,7 @@ def main():
             averaged_global_hamming_pe[f'{l}_val'].append(mean_hamming_between_pe)
             averaged_local_hamming_pe[f'{l}_val'].append(mean_hamming_within_pe)
     
-    x = np.linspace(0, 1000, 20)
+    x = np.linspace(0, 1000, 100)
 
     # Get mean and std across images
     for l in L_vals:
@@ -346,7 +346,7 @@ def main():
     ax1.fill_between(x, np.array(averaged_global_hamming_neg_xy)+np.array(averaged_global_hamming_neg_xy_std), np.array(averaged_global_hamming_neg_xy)-np.array(averaged_global_hamming_neg_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
     ax1.legend()
-    fig1.savefig('hamming_images/hamming_global_run2')
+    fig1.savefig('hamming_images/hamming_global_run3')
 
     # Local hamming distances plot
 
@@ -367,7 +367,7 @@ def main():
     ax2.fill_between(x, np.array(averaged_local_hamming_neg_xy)+np.array(averaged_local_hamming_neg_xy_std), np.array(averaged_local_hamming_neg_xy)-np.array(averaged_local_hamming_neg_xy_std), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
     ax2.legend()
-    fig2.savefig('hamming_images/hamming_local_run2')
+    fig2.savefig('hamming_images/hamming_local_run3')
 
 if __name__ == '__main__':
     main()

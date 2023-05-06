@@ -15,30 +15,39 @@ import seaborn as sns
 
 sns.set_style('darkgrid')
 colors = sns.color_palette('tab10')
-
 device = 'cuda:0'
 
-class Net(nn.Module):
-    def __init__(self, input_dim, hidden, out):
-        super(Net, self).__init__()
-        self.hidden = hidden
-        self.l1 = nn.Linear(input_dim, hidden)
-        self.l2 = nn.Linear(hidden, hidden)
-        self.l3 = nn.Linear(hidden, hidden)
-        self.l4 = nn.Linear(hidden, hidden)
-        self.l5 = nn.Linear(hidden, out)
+class CNN(nn.Module):
+    def __init__(self, inp_channels, classes, flattened):
+        super(CNN, self).__init__()
+
+        self.conv1 = nn.Conv2d(in_channels=inp_channels, out_channels=32,
+			kernel_size=(3, 3), stride=2)
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64,
+			kernel_size=(3, 3), stride=2) 
+        self.conv3 = nn.Conv2d(in_channels=64, out_channels=96,
+			kernel_size=(3, 3), stride=2)
+		# initialize first (and only) set of FC => RELU layers
+        self.fc1 = nn.Linear(in_features=flattened, out_features=256)
+        self.fc2 = nn.Linear(in_features=256, out_features=classes)
+
+        self.maxpool = nn.MaxPool2d(kernel_size=(3, 3), stride=(2, 2))
         self.relu = nn.ReLU()
 
     def forward(self, x, act=False):
 
-        out_1 = self.relu(self.l1(x))
-        out_2 = self.relu(self.l2(out_1))
-        out_3 = self.relu(self.l3(out_2))
-        out_4 = self.relu(self.l4(out_3))
-        out_5 = self.l5(out_4)
+        out_1 = self.relu(self.conv1(x))
+        out_2 = self.relu(self.conv2(out_1))
+        out_3 = self.relu(self.conv3(out_2))
+
+        flattened_out = out_3.view(out_3.shape[0], -1)
+
+        out_4 = self.relu(self.fc1(flattened_out))
+        out_5 = self.fc2(out_4)
 
         if act:
-            pattern = torch.cat((out_1, out_2, out_3, out_4), dim=0).squeeze()
+            # input will have to have a batch of 1 this time, only for CNNs not for MLPs
+            pattern = torch.cat((out_1.flatten(), out_2.flatten(), out_3.flatten(), out_4.flatten()), dim=0).squeeze()
             return pattern
 
         return out_5
@@ -127,7 +136,7 @@ def compute_hamming(model, x_0, x_1):
 
     return hamming.item()
 
-def hamming_within_regions(model, optim, inp_batch, inp_targets, iterations):
+def hamming_within_regions(model, optim, inp_batch, inp_targets, iterations, dif_classes=False):
 
     print('Starting hamming within local regions...')
     hamming_local = []
@@ -146,21 +155,25 @@ def hamming_within_regions(model, optim, inp_batch, inp_targets, iterations):
         targets = torch.cat((train_targets[:num], train_targets[num+1:]), dim=0)
         
         # Get the closest datapoint
-        distances = torch.linalg.norm(data_point - points, dim=1).squeeze()
+        distances = torch.linalg.norm(data_point.flatten() - points.view(points.shape[0], -1), dim=1).squeeze()
 
-        # Need to ensure they are of different classes! Avoid mostly showing highly correlated gradients
-        neighbors = points[torch.topk(distances, k=5000, largest=False)[1].tolist()]
-        neighbors_target = targets[torch.topk(distances, k=5000, largest=False)[1].tolist()]
+        if dif_classes == True:
+            # Need to ensure they are of different classes! Avoid mostly showing highly correlated gradients
+            top_neighbors = points[torch.topk(distances, k=5000, largest=False)[1].tolist()]
+            top_neighbors_target = targets[torch.topk(distances, k=5000, largest=False)[1].tolist()]
 
-        data_point_label = data_target.item()
-        indices_different_classes = torch.where(neighbors_target == data_point_label)[0].tolist()
-        
-        # Remove the elements at the specified indices
-        neighbors_different_classes = torch.stack([neighbors[i] for i in range(neighbors.shape[0]) if i not in indices_different_classes], dim=0).to(device)
+            data_point_label = data_target.item()
+            indices_different_classes = torch.where(top_neighbors_target == data_point_label)[0].tolist()
+            
+            # Remove the elements at the specified indices
+            neighbors = torch.stack([top_neighbors[i] for i in range(top_neighbors.shape[0]) if i not in indices_different_classes], dim=0).to(device)
+        else:
+            # Need to ensure they are of different classes! Avoid mostly showing highly correlated gradients
+            neighbors = points[torch.topk(distances, k=25, largest=False)[1].tolist()]
 
         for j in range(25):
 
-            hamming = compute_hamming(model, data_point, neighbors_different_classes[j])
+            hamming = compute_hamming(model, data_point.unsqueeze(0), neighbors[j].unsqueeze(0))
             hamming_local.append(hamming)
 
     return hamming_local
@@ -178,12 +191,12 @@ def hamming_between_regions(model, optim, inp_batch, iterations):
         data_point = train_inputs[num]
         
         # Get the furthest datapoint
-        distances = torch.linalg.norm(data_point - train_inputs, dim=1).squeeze()
+        distances = torch.linalg.norm(data_point.flatten() - train_inputs.view(train_inputs.shape[0], -1), dim=1).squeeze()
         distant_points = train_inputs[torch.topk(distances, k=25)[1].tolist()]
 
         for j in range(25):
 
-            hamming = compute_hamming(model, data_point, distant_points[j])
+            hamming = compute_hamming(model, data_point.unsqueeze(0), distant_points[j].unsqueeze(0))
             hamming_between.append(hamming)
 
     return hamming_between
@@ -205,20 +218,26 @@ def train_model(opt, model, train_data, train_targets, train_loader):
     model.train()
     # Loop! 
     for iter_num in range(opt.NUM_ITER):
+        running_loss = 0
+        num_loops = 0
 
         for data, target in train_loader:
             data, target = data.to(device), target.to(device)
 
             optim.zero_grad()
-            y = model(data.view(data.shape[0], -1))
+            y = model(data)
             loss = loss_fn(y, target)
+            running_loss += loss.item()
             loss.backward()
             optim.step()
+            num_loops += 1
+        
+        print(f"Training Loss at Epoch {iter_num}: {running_loss/num_loops}")
     
         # mean hamming distance during training
         if iter_num % 5 == 0:
 
-            hamming_neighbors = hamming_within_regions(model, optim, train_data, train_targets, 2500)
+            hamming_neighbors = hamming_within_regions(model, optim, train_data, train_targets, 2500, opt.dif_classes)
             mean_hamming_neighbors.append(np.mean(np.array(hamming_neighbors)))
             std_hamming_neighbors.append(np.std(np.array(hamming_neighbors)))
 
@@ -235,7 +254,7 @@ def main():
     opt.LR = 0.001              # <--- LR for the optimizer. 
     opt.NUM_ITER = 100         # <--- Number of training iterations
     opt.batch_size = 512         # <--- batch size
-    opt.dif_classes = False
+    opt.dif_classes = True
 
     datasets = ['mnist', 'fashion_mnist', 'cifar10', 'cifar100']
 
@@ -261,10 +280,10 @@ def main():
     ######################################## MNIST ###################################
 
     mnist_data = next(iter(mnist_data))
-    mnist_points = mnist_data[0].view(mnist_data[0].shape[0], -1).to(device)
+    mnist_points = mnist_data[0].to(device)
     mnist_targets = mnist_data[1].to(device)
 
-    model = Net(784, 512, 10).to(device)
+    model = CNN(1, 10, 384).to(device)
 
     mean_hamming_neighbor, mean_hamming_distant, std_hamming_neighbor, std_hamming_distant = train_model(opt, model, mnist_points, mnist_targets, mnist_loader)
 
@@ -278,10 +297,10 @@ def main():
     ######################################## Fashion MNIST ###################################
 
     fashion_data = next(iter(fashion_data))
-    fashion_points = fashion_data[0].view(fashion_data[0].shape[0], -1).to(device)
+    fashion_points = fashion_data[0].to(device)
     fashion_targets = fashion_data[1].to(device)
 
-    model = Net(784, 512, 10).to(device)
+    model = CNN(1, 10, 384).to(device)
 
     mean_hamming_neighbor, mean_hamming_distant, std_hamming_neighbor, std_hamming_distant = train_model(opt, model, fashion_points, fashion_targets, fashion_loader)
 
@@ -295,10 +314,10 @@ def main():
     ######################################## CIFAR10 ###################################
 
     cifar_data = next(iter(cifar_data))
-    cifar_points = cifar_data[0].view(cifar_data[0].shape[0], -1).to(device)
+    cifar_points = cifar_data[0].to(device)
     cifar_targets = cifar_data[1].to(device)
 
-    model = Net(3*32*32, 512, 10).to(device)
+    model = CNN(3, 10, 864).to(device)
 
     mean_hamming_neighbor, mean_hamming_distant, std_hamming_neighbor, std_hamming_distant = train_model(opt, model, cifar_points, cifar_targets, cifar_loader)
 
@@ -312,10 +331,10 @@ def main():
     ######################################## CIFAR100 ###################################
 
     cifar100_data = next(iter(cifar100_data))
-    cifar100_points = cifar100_data[0].view(cifar100_data[0].shape[0], -1).to(device)
+    cifar100_points = cifar100_data[0].to(device)
     cifar100_targets = cifar100_data[1].to(device)
 
-    model = Net(3*32*32, 512, 100).to(device)
+    model = CNN(3, 100, 864).to(device)
 
     mean_hamming_neighbor, mean_hamming_distant, std_hamming_neighbor, std_hamming_distant = train_model(opt, model, cifar100_points, cifar100_targets, cifar100_loader)
 
@@ -340,7 +359,6 @@ def main():
         neighbors_hamming_std[f'{data}'] = np.squeeze(np.array(neighbors_hamming_std[f'{data}']))
 
     # Global Hamming Distances plot
-
     fig1, ax1 = plt.subplots()
     ax1.plot(x, distant_hamming[f'mnist'], label='MNIST', linewidth=2, color=colors[0])
     ax1.fill_between(x, np.array(distant_hamming[f'mnist'])+np.array(distant_hamming_std[f'mnist']), np.array(distant_hamming[f'mnist'])-np.array(distant_hamming_std[f'mnist']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True, color=colors[0])
@@ -355,7 +373,7 @@ def main():
     ax1.fill_between(x, np.array(distant_hamming[f'cifar100'])+np.array(distant_hamming_std[f'cifar100']), np.array(distant_hamming[f'cifar100'])-np.array(distant_hamming_std[f'cifar100']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True, color=colors[1])
 
     ax1.legend(loc='best')
-    fig1.savefig('hamming_real_data/hamming_distant_inputs')
+    fig1.savefig('hamming_real_data/hamming_distant_inputs_cnn')
 
     # Local hamming distances plot
 
@@ -373,7 +391,7 @@ def main():
     ax2.fill_between(x, np.array(neighbors_hamming[f'cifar100'])+np.array(neighbors_hamming_std[f'cifar100']), np.array(neighbors_hamming[f'cifar100'])-np.array(neighbors_hamming_std[f'cifar100']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True, color=colors[1])
 
     ax2.legend(loc='best')
-    fig2.savefig('hamming_real_data/hamming_neighboring_inputs_difclass')
+    fig2.savefig('hamming_real_data/hamming_neighboring_inputs_cnn')
 
 if __name__ == '__main__':
     main()

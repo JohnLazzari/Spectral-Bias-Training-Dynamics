@@ -90,23 +90,6 @@ def get_activation_regions(model, input, L, slice, first_layer=False):
         
         return num_unique_patterns, unique_patterns.cpu().numpy().tolist(), activations.cpu().numpy().tolist()
 
-    '''
-    with torch.no_grad():
-        patterns = []
-        # get patterns
-        for i, pixel in enumerate(input):
-            pixel = pixel.squeeze()
-            act_pattern = model(pixel, act=True, first_layer=first_layer)
-            patterns.append(list(act_pattern))
-        # get the amount of unique patterns
-        unique_patterns = []
-        for pattern in patterns:
-            if pattern not in unique_patterns:
-                unique_patterns.append(pattern)
-
-    return len(unique_patterns), unique_patterns, patterns
-    '''
-
 def plot_patterns(patterns, all_patterns):
 
     dict_patterns = {}

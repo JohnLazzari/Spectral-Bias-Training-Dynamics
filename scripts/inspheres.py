@@ -16,9 +16,12 @@ from torch import linalg as LA
 import itertools
 import argparse
 from matplotlib import cm
+from ortools.linear_solver import pywraplp
+import ortools
+import cvxpy as cp
 
-sns.set_style('darkgrid')
-colors = sns.color_palette()
+sns.set_style('white')
+colors = sns.color_palette('tab10')
 
 class Net(nn.Module):
     def __init__(self, input_dim, hidden):
@@ -28,7 +31,7 @@ class Net(nn.Module):
         self.l2 = nn.Linear(hidden, hidden)
         self.l3 = nn.Linear(hidden, hidden)
         self.l4 = nn.Linear(hidden, hidden)
-        self.l5 = nn.Linear(hidden, 3)
+        self.l5= nn.Linear(hidden, 3)
         self.relu = nn.ReLU()
 
     def forward(self, x, act=False):
@@ -56,8 +59,7 @@ class Net(nn.Module):
         out_5 = self.l5(out_4)
 
         if act:
-            pattern = torch.cat((act_1, act_2, act_3, act_4), dim=1).squeeze()
-            return pattern
+            return act_1, act_2, act_3, act_4
 
         return out_5
 
@@ -68,28 +70,41 @@ def set_positive_values_to_one(tensor):
     tensor[mask] = 1
     return tensor
 
-def get_zero_neurons(model, input):
-    # Change this value to the total number of neurons in the network
-    num_neurons = 2048
-    zero_neurons = np.zeros([num_neurons])
+def get_inradius(model, inp, min_x, max_x):
 
-    # Compute activation patterns for all pixels in one batch
-    batch_size = input.shape[0]
-    act_patterns = model(input.view(batch_size, -1), act=True)
+    with torch.no_grad():
 
-    # Convert activation patterns to numpy arrays
-    act_patterns = act_patterns.detach().cpu().numpy()
+        l1_weight, l1_bias = model.l1.weight, model.l1.bias
+    
+        # Get the activaton pattern
+        act1, act2, act3, act4 = model(inp, act=True)
+        act1 = set_positive_values_to_one(act1)
 
-    # Compute which neurons are zero for each activation pattern
-    is_zero = (act_patterns == 0)
+    x = cp.Variable((inp.shape[0],))
+    r = cp.Variable(1)
 
-    # Sum up the number of zeros for each neuron
-    zero_counts = np.sum(is_zero, axis=0)
+    l1_weight, l1_bias = l1_weight.cpu().detach().numpy(), l1_bias.cpu().detach().numpy()
+    l1_weight, l1_bias = cp.Constant(l1_weight), cp.Constant(l1_bias)
 
-    # Count the number of "dead" neurons (i.e., those that are zero for all input patterns)
-    dead_count = np.sum(zero_counts == input.shape[0])
+    # add constraints
+    constraints = []
 
-    return dead_count
+    for i, neuron in enumerate(l1_weight):
+        inner_product = cp.sum(cp.multiply(x, neuron))
+        if act1[i] == 0:
+            constraints.append(inner_product + (r*cp.norm(neuron)) + l1_bias[i] <= 0)
+        else:
+            constraints.append(inner_product - (r*cp.norm(neuron)) + l1_bias[i] >= 0)
+
+    for i in range(inp.shape[0]):
+        constraints.append(min_x + r <= x[i])
+        constraints.append(max_x - r >= x[i])
+
+    objective = cp.Maximize(r)
+    problem = cp.Problem(objective, constraints)
+    result = problem.solve()
+    
+    return r.value[0]
 
 def get_data(image, encoding, L=10, batch_size=2048, negative=False, shuffle=True):
 
@@ -103,7 +118,7 @@ def get_data(image, encoding, L=10, batch_size=2048, negative=False, shuffle=Tru
     inp_batch, inp_target, ind_vals = PE.get_dataset(L, negative=negative)
 
     inp_batch, inp_target = torch.Tensor(inp_batch), torch.Tensor(inp_target)
-    inp_batch, inp_target = inp_batch.to('cuda:0'), inp_target.to('cuda:0')
+    inp_batch, inp_target = inp_batch.to('cuda:1'), inp_target.to('cuda:1')
 
     # create batches to track batch loss and show it is more stable due to gabor encoding
     full_batches = []
@@ -133,27 +148,21 @@ def get_data(image, encoding, L=10, batch_size=2048, negative=False, shuffle=Tru
 
     return random_batches, random_targets
 
-def train(model, optim, criterion, im, encoding, L, args):
+def train(model, optim, criterion, im, encoding, L, args, negative=False):
 
     # Get the training data
-    train_inp_batch, train_inp_target = get_data(image=im, encoding=encoding, L=L, batch_size=args.batch_size, negative=args.negative)
-    inp_batch, inp_target = get_data(image=im, encoding=encoding, L=L, batch_size=1, shuffle=False, negative=args.negative)
+    train_inp_batch, train_inp_target = get_data(image=im, encoding=encoding, L=L, batch_size=args.batch_size, negative=negative)
+    inp_batch, inp_target = get_data(image=im, encoding=encoding, L=L, batch_size=1, shuffle=False, negative=negative)
 
-    zero_neuron_plot = []
+    inp_batch = inp_batch.squeeze()
+    min_x = -1
+    max_x = 1
 
+    inspheres = []
     # Start the training loop
     for epoch in range(args.epochs):
 
-        dead_neuron_count = 0
         running_loss = 0
-
-        # get the number of dead neurons, start at initialization
-        if epoch % 50 == 0:
-            with torch.no_grad():
-                print('Counting dead ReLU neurons...')
-                dead = get_zero_neurons(model, inp_batch)
-                print('Number dead neurons at epoch {}: {}'.format(epoch, dead))
-                zero_neuron_plot.append(dead)
 
         # Train the model for one epoch
         for i, pixel in enumerate(train_inp_batch):
@@ -171,53 +180,70 @@ def train(model, optim, criterion, im, encoding, L, args):
         if args.print_loss:
             print('Loss at epoch {}: {}'.format(epoch, epoch_loss))
 
-    return zero_neuron_plot
+    # Get inradius
+    for i in range(1000):
+        rand_inp = 2 * torch.rand(inp_batch.shape[-1]).to('cuda:1') - 1 
+        radius = get_inradius(model, rand_inp, min_x, max_x)
+        #print(f'Iteration {i}: {radius}')
+        inspheres.append(radius)
+
+    return inspheres
 
 def main():
 
     parser = argparse.ArgumentParser(description='Blah.')
     parser.add_argument('--neurons', type=int, default=512, help='Number of neurons per layer')
-    parser.add_argument('--epochs', type=int, default=1000, help='Number of epochs')
+    parser.add_argument('--epochs', type=int, default=2500, help='Number of epochs')
     parser.add_argument('--batch_size', type=int, default=8192, help='make a training and testing set')
     parser.add_argument('--print_loss', type=bool, default=True, help='print training loss')
-    parser.add_argument('--negative', type=bool, default=False, help='-1 to 1')
-    parser.add_argument('--visualize_regions', type=bool, default=False, help='plot the losses')
-    parser.add_argument('--train_encoding', action='store_false', default=True, help='train positional encoding')
-    parser.add_argument('--train_coordinates', action='store_false', default=True, help='train coordinates')
 
     args = parser.parse_args()
 
     # change image to any in image_demonstration
     test_data = np.load('test_data_div2k.npy')
     test_data = test_data[:5]
-    
-    averaged_dead_neurons_xy = []
-    averaged_dead_neurons_xy_std = []
+
+    L_vals = [4, 8, 12, 16, 20]
+    # lists for all confusion for each image
+
+    averaged_local_confusion_pe = {}
+    averaged_global_confusion_pe = {}
+
+    for l in L_vals:
+        averaged_local_confusion_pe[f'{l}_val'] = []
+        averaged_global_confusion_pe[f'{l}_val'] = []
 
     # Go through each image individually
     for im in test_data:
 
-        #################################### Raw XY ##############################################
+        #################################### Sin Cos #############################################
 
-        # Set up raw_xy network
-        model_raw = Net(2, args.neurons).to('cuda:0')
-        optim_raw = torch.optim.Adam(model_raw.parameters(), lr=.001)
-        criterion = nn.MSELoss()
+        print("\nBeginning Positional Encoding Training...")
+        for l in L_vals:
 
-        if args.train_coordinates:
-            print("\nBeginning Raw XY Training...")
-            xy_zero_neuron_plot = train(model_raw, optim_raw, criterion, im, 'raw_xy', 0, args)
-        
-        averaged_dead_neurons_xy.append(xy_zero_neuron_plot)
+            # Set up pe network
+            model_pe = Net(l*4, args.neurons).to('cuda:1')
+            optim_pe = torch.optim.Adam(model_pe.parameters(), lr=.001)
+            criterion = nn.MSELoss()
+
+            inradius = train(model_pe, optim_pe, criterion, im, 'sin_cos', l, args)
+
+            averaged_global_confusion_pe[f'{l}_val'].append(inradius)
     
-    averaged_dead_neurons_xy = np.array(averaged_dead_neurons_xy)
-    averaged_dead_neurons_xy_std = np.std(averaged_dead_neurons_xy, axis=0)
-    averaged_dead_neurons_xy = np.mean(averaged_dead_neurons_xy, axis=0)
+    ##################################### Plotting Data ###########################################
 
-    np.savetxt('dead_neurons/dead_neurons_-33.txt', averaged_dead_neurons_xy)
-    np.savetxt('dead_neurons/dead_neurons_-33_std.txt', averaged_dead_neurons_xy_std)
+    for l in L_vals:
+        averaged_global_confusion_pe[f'{l}_val'] = np.array(averaged_global_confusion_pe[f'{l}_val']).flatten()
 
+    fig1, ax1 = plt.subplots()
+    sns.kdeplot(data=averaged_global_confusion_pe[f'4_val'], fill=True, label='Encoding L=4', linewidth=2)
+    sns.kdeplot(data=averaged_global_confusion_pe[f'8_val'], fill=True, label='Encoding L=8', linewidth=2)
+    sns.kdeplot(data=averaged_global_confusion_pe[f'12_val'], fill=True, label='Encoding L=12', linewidth=2)
+    sns.kdeplot(data=averaged_global_confusion_pe[f'16_val'], fill=True, label='Encoding L=16', linewidth=2)
+    sns.kdeplot(data=averaged_global_confusion_pe[f'20_val'], fill=True, label='Encoding L=20', linewidth=2)
+    ax1.set_xlim(0, .2)
+    ax1.legend(loc='best')
+    fig1.savefig(f'insphere_im/inspheres_l1_{args.epochs}')
 
 if __name__ == '__main__':
     main()
-

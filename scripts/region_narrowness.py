@@ -59,7 +59,7 @@ def get_data(image, encoding, shuffle, L=10,  batch_size=2048):
     inp_batch, inp_target, ind_vals = PE.get_dataset(L)
 
     inp_batch, inp_target = torch.Tensor(inp_batch), torch.Tensor(inp_target)
-    inp_batch, inp_target = inp_batch.to('cuda:1'), inp_target.to('cuda:1')
+    inp_batch, inp_target = inp_batch.to('cuda:0'), inp_target.to('cuda:0')
 
     # create batches to track batch loss and show it is more stable due to gabor encoding
     full_batches = []
@@ -103,7 +103,7 @@ def main():
     test_data = np.load('test_data_div2k.npy')
     test_data = test_data[:5]
 
-    L_vals = [4, 8, 16]
+    L_vals = [4, 8, 12, 16, 20]
 
     averaged_distances_pe = {}
     averaged_distances_pe_std = {}
@@ -116,12 +116,12 @@ def main():
 
         for l in L_vals:
 
-            model_pe = Net(l*4, 512).to('cuda:1')
+            model_pe = Net(l*4, 512).to('cuda:0')
             optim_pe = torch.optim.Adam(model_pe.parameters(), lr=.001)
 
             # Get the encoding sin cos
             inp_batch, inp_target = get_data(image=im, encoding='sin_cos', shuffle=True, L=l, batch_size=args.batch_size)
-            train_inp_batch, train_inp_target = get_data(image=im, encoding='sin_cos', shuffle=True, L=l, batch_size=4096)
+            train_inp_batch, train_inp_target = get_data(image=im, encoding='sin_cos', shuffle=True, L=l, batch_size=8192)
 
             cur_dist = []
 
@@ -179,13 +179,19 @@ def main():
     ax1.plot(x, averaged_distances_pe[f'8_val'], label='Encoding L=8', linewidth=2)
     ax1.fill_between(x, np.array(averaged_distances_pe[f'8_val'])+np.array(averaged_distances_pe_std[f'8_val']), np.array(averaged_distances_pe[f'8_val'])-np.array(averaged_distances_pe_std[f'8_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
 
+    ax1.plot(x, averaged_distances_pe[f'12_val'], label='Encoding L=12', linewidth=2)
+    ax1.fill_between(x, np.array(averaged_distances_pe[f'12_val'])+np.array(averaged_distances_pe_std[f'12_val']), np.array(averaged_distances_pe[f'12_val'])-np.array(averaged_distances_pe_std[f'12_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+
     ax1.plot(x, averaged_distances_pe[f'16_val'], label='Encoding L=16', linewidth=2)
     ax1.fill_between(x, np.array(averaged_distances_pe[f'16_val'])+np.array(averaged_distances_pe_std[f'16_val']), np.array(averaged_distances_pe[f'16_val'])-np.array(averaged_distances_pe_std[f'16_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
+
+    ax1.plot(x, averaged_distances_pe[f'20_val'], label='Encoding L=20', linewidth=2)
+    ax1.fill_between(x, np.array(averaged_distances_pe[f'20_val'])+np.array(averaged_distances_pe_std[f'20_val']), np.array(averaged_distances_pe[f'20_val'])-np.array(averaged_distances_pe_std[f'20_val']), alpha=0.2, linewidth=2, linestyle='dashdot', antialiased=True)
         
     ax1.legend()
     ax1.set_xlabel("Epochs")
     ax1.set_ylabel("Distance to nearest Boundary")
-    fig1.savefig('region_distances/region_dist_4096')
+    fig1.savefig('region_distances/region_dist_test')
     
 if __name__ == '__main__':
     main()

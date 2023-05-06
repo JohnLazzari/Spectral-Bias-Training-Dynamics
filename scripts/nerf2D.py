@@ -76,8 +76,8 @@ class Positional_Encoding(object):
                 # i.e. passing raw coordinates instead of positional encoding 
                 if self.encoding == 'raw_xy':
                     if negative:
-                        xdash = (x/width)
-                        ydash = (y/height)
+                        xdash = 2 * (x/width) - 1
+                        ydash = 2 * (y/height) - 1
                         p_enc = [xdash, ydash]
                     else:
                         xdash = (x/width)
