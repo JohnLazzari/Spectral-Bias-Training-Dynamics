@@ -270,15 +270,6 @@ def main():
     cifar_data, cifar_loader = CIFAR10_Dataset(opt.batch_size)
     cifar100_data, cifar100_loader = CIFAR100_Dataset(opt.batch_size)
 
-    # TODO
-    # See the effect of batch size and whether or not this displays more confusion
-    # Find the right epoch to display the confusion densities
-    # Change the sampling as stated in train_model function
-    # Then repeat the exact same thing for CNNs
-    # Actually, change the sampling in the confusion one (and i guess hamming distance) to be the k=25 nearest neighbors corresponding to different classes
-    # since many of them might be in the same class for like mnist and fashion mnist, which may be the cause for more positively correlated gradients 
-    # for the neighboring inputs. The distant inputs can be kept the same.
-
     ######################################## MNIST ###################################
 
     mnist_data = next(iter(mnist_data))
@@ -346,7 +337,6 @@ def main():
         #distant_confusion[f'{data}'] = np.squeeze(np.array(distant_confusion[f'{data}']))
         neighbors_confusion[f'{data}'] = np.squeeze(np.array(neighbors_confusion[f'{data}']))
 
-    '''
     fig1, ax1 = plt.subplots()
     sns.kdeplot(data=distant_confusion[f'mnist'], fill=True, label='MNIST', linewidth=2, color=colors[0])
     sns.kdeplot(data=distant_confusion[f'fashion_mnist'], fill=True, label='Fashion MNIST', linewidth=2, color=colors[3])
@@ -357,7 +347,6 @@ def main():
     ax1.set_xlim(-1, 1)
     ax1.legend(loc='best')
     fig1.savefig('confusion_real_data/confusion_distant_inputs_cnn')
-    '''
 
     # Local hamming distances plot
     fig2, ax2 = plt.subplots()

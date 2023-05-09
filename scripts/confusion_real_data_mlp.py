@@ -249,15 +249,6 @@ def main():
     cifar_data, cifar_loader = CIFAR10_Dataset(opt.batch_size)
     cifar100_data, cifar100_loader = CIFAR100_Dataset(opt.batch_size)
 
-    # TODO
-    # See the effect of batch size and whether or not this displays more confusion
-    # Find the right epoch to display the confusion densities
-    # Change the sampling as stated in train_model function
-    # Then repeat the exact same thing for CNNs
-    # Actually, change the sampling in the confusion one (and i guess hamming distance) to be the k=25 nearest neighbors corresponding to different classes
-    # since many of them might be in the same class for like mnist and fashion mnist, which may be the cause for more positively correlated gradients 
-    # for the neighboring inputs. The distant inputs can be kept the same.
-
     ######################################## MNIST ###################################
 
     mnist_data = next(iter(mnist_data))

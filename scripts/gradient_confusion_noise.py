@@ -453,8 +453,7 @@ def main():
     #################################### Sin Cos #############################################
     if args.train_encoding:
         print("\nBeginning Positional Encoding Training...")
-        pe_param_norms, pe_num_patterns, pe_layer_1_norms, pe_layer_2_norms, pe_layer_3_norms, pe_zero_neuron_plot, pe_losses, inp_batch, inp_target, confusion_within_pe, confusion_between_pe, mean_hamming_within_pe, std_hamming_within_pe, mean_hamming_between_pe, std_hamming_between_pe, min_confusion_in_pe, min_confusion_between_pe = train(model_pe, optim_pe, criterion, im2arr, 'gauss_sin_cos', args.L, args)
-        #pe_param_norms, pe_num_patterns, pe_layer_1_norms, pe_layer_2_norms, pe_layer_3_norms, pe_zero_neuron_plot, pe_losses, inp_batch, inp_target, confusion_within_pe, confusion_between_pe, mean_hamming_within_pe, std_hamming_within_pe, mean_hamming_between_pe, std_hamming_between_pe, min_confusion_in_pe, min_confusion_between_pe = train(model_pe, optim_pe, criterion, im2arr, 'sin_cos', args.L, args)
+        pe_param_norms, pe_num_patterns, pe_layer_1_norms, pe_layer_2_norms, pe_layer_3_norms, pe_zero_neuron_plot, pe_losses, inp_batch, inp_target, confusion_within_pe, confusion_between_pe, mean_hamming_within_pe, std_hamming_within_pe, mean_hamming_between_pe, std_hamming_between_pe, min_confusion_in_pe, min_confusion_between_pe = train(model_pe, optim_pe, criterion, im2arr, 'sin_cos', args.L, args)
     
     plt.plot(mean_hamming_within_pe, label='within')
     plt.plot(mean_hamming_between_pe, label='between')
